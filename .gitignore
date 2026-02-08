@@ -1,0 +1,21 @@
+# Профили Chrome (создаются автоматически, не нужны в репо)
+ChromeProfiles/
+
+# Лог-файлы
+log.txt
+*.log
+
+# AutoIt compiled
+*.exe
+*.a3x
+
+# Системные файлы Windows
+Thumbs.db
+Desktop.ini
+*.tmp
+
+# IDE файлы
+.vscode/
+.cursor/
+*.swp
+*.swo
