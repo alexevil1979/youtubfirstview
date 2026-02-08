@@ -1,9 +1,10 @@
 #RequireAdmin
 ; ============================================================================
 ; YouTube Shorts AutoView — Автоматический просмотр YouTube Shorts
-; Версия: 1.0
-; Описание: Скрипт получает URL'ы с сервера, открывает их в Chrome,
-;           имитирует поведение реального человека и отправляет статус.
+; Версия: 2.0 (интеграция с YouPub API)
+; Описание: Скрипт получает URL'ы опубликованных роликов с сервера YouPub,
+;           открывает их в Chrome, имитирует поведение реального человека
+;           и отправляет статус просмотра обратно.
 ; Горячая клавиша остановки: F10 или Ctrl+Alt+Q
 ; ============================================================================
 
@@ -18,20 +19,28 @@
 ; === НАСТРОЙКИ (ИЗМЕНЯЙТЕ ПОД СЕБЯ) ========================================
 ; ============================================================================
 
-; --- Сервер API ---
-Global Const $API_BASE_URL = "http://your-server.ru"           ; Базовый URL сервера
-Global Const $API_GET_URLS = $API_BASE_URL & "/get_urls.php"    ; Эндпоинт получения URL'ов
-Global Const $API_SEND_STATUS = $API_BASE_URL & "/status.php"   ; Эндпоинт отправки статуса
-Global Const $API_LIMIT = 5                                      ; Сколько URL запрашивать за раз
+; --- Сервер API YouPub ---
+Global Const $API_BASE_URL = "https://you.1tlt.ru"                  ; Базовый URL сервера YouPub
+Global Const $API_GET_URLS = $API_BASE_URL & "/api/autoview/urls"    ; Эндпоинт получения URL'ов
+Global Const $API_SEND_STATUS = $API_BASE_URL & "/api/autoview/status" ; Эндпоинт отправки статуса
+Global Const $API_LIMIT = 5                                           ; Сколько URL запрашивать за раз
+
+; --- Авторизация ---
+; Токен создаётся в админке: /admin/autoview → "Создать токен"
+; Можно хранить в файле token.txt рядом со скриптом
+Global $g_sApiToken = ""
 
 ; --- Chrome ---
 Global Const $CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 Global Const $CHROME_PROFILE_DIR = @ScriptDir & "\ChromeProfiles" ; Папка для профилей Chrome
 Global $g_iProfileCounter = 1                                     ; Счётчик профилей
 
+; --- Worker ID (уникальный для каждого инстанса) ---
+Global $g_sWorkerId = "bot_" & @ComputerName & "_" & StringRight(@AutoItPID, 4)
+
 ; --- Тайминги ---
-Global Const $MIN_WATCH_TIME = 45      ; Минимальное время просмотра (секунды)
-Global Const $MAX_WATCH_TIME = 130     ; Максимальное время просмотра (секунды)
+Global Const $MIN_WATCH_TIME = 45      ; Минимальное время просмотра (секунды) — если сервер не задал
+Global Const $MAX_WATCH_TIME = 130     ; Максимальное время просмотра (секунды) — если сервер не задал
 Global Const $MIN_PAUSE = 3            ; Минимальная пауза между действиями (секунды)
 Global Const $MAX_PAUSE = 12           ; Максимальная пауза между действиями (секунды)
 Global Const $MIN_CHECK_INTERVAL = 30  ; Минимальный интервал проверки новых URL (секунды)
@@ -58,8 +67,25 @@ If Not FileExists($CHROME_PROFILE_DIR) Then
     DirCreate($CHROME_PROFILE_DIR)
 EndIf
 
-_WriteLog("=== Скрипт запущен ===")
+; Загружаем токен из файла, если не задан в настройках
+If $g_sApiToken = "" Then
+    Local $sTokenFile = @ScriptDir & "\token.txt"
+    If FileExists($sTokenFile) Then
+        $g_sApiToken = StringStripWS(FileRead($sTokenFile), 3)
+        _WriteLog("Токен загружен из token.txt (" & StringLeft($g_sApiToken, 8) & "...)")
+    Else
+        _WriteLog("ОШИБКА: Токен не задан! Создайте token.txt с API-токеном или укажите в настройках.")
+        MsgBox(16, "Ошибка", "API-токен не найден!" & @CRLF & @CRLF & _
+            "1. Откройте " & $API_BASE_URL & "/admin/autoview" & @CRLF & _
+            "2. Создайте токен" & @CRLF & _
+            "3. Сохраните его в файл token.txt рядом со скриптом")
+        Exit
+    EndIf
+EndIf
+
+_WriteLog("=== Скрипт запущен (v2.0 YouPub) ===")
 _WriteLog("API сервер: " & $API_BASE_URL)
+_WriteLog("Worker ID: " & $g_sWorkerId)
 _WriteLog("Chrome: " & $CHROME_PATH)
 _WriteLog("Горячие клавиши остановки: F10 или Ctrl+Alt+Q")
 
@@ -93,19 +119,21 @@ Func _MainLoop()
             For $i = 0 To UBound($aURLs) - 1
                 If Not $g_bRunning Then ExitLoop
 
-                ; Каждый элемент — массив [url_id, url]
+                ; Каждый элемент — массив [url_id, url, target_watch_time]
                 If IsArray($aURLs[$i]) Then
                     Local $aItem = $aURLs[$i]
                     Local $sURLId = $aItem[0]
                     Local $sURL = $aItem[1]
+                    Local $iServerWatchTime = Number($aItem[2])
 
                     _WriteLog("Начинаю просмотр URL #" & $sURLId & ": " & $sURL)
-                    Local $iWatchTime = _ViewURL($sURL, $sURLId)
+                    Local $iWatchTime = _ViewURL($sURL, $sURLId, $iServerWatchTime)
 
                     If $iWatchTime > 0 Then
-                        _SendStatus($sURLId, $iWatchTime)
+                        _SendStatus($sURLId, "done", $iWatchTime)
                         _WriteLog("URL #" & $sURLId & " отработан. Время просмотра: " & $iWatchTime & " сек.")
                     Else
+                        _SendStatus($sURLId, "error", 0, "Chrome window not found or closed early")
                         _WriteLog("ОШИБКА: Не удалось просмотреть URL #" & $sURLId)
                     EndIf
 
@@ -138,17 +166,18 @@ EndFunc
 Func _GetNewURLs()
     _WriteLog("Запрашиваю URL'ы с сервера...")
 
-    Local $sResponse = _HttpGet($API_GET_URLS & "?limit=" & $API_LIMIT)
+    Local $sRequestURL = $API_GET_URLS & "?limit=" & $API_LIMIT & "&worker_id=" & $g_sWorkerId
+    Local $sResponse = _HttpGet($sRequestURL)
 
     If $sResponse = "" Or @error Then
         _WriteLog("ОШИБКА: Не удалось получить ответ от сервера")
         Return SetError(1, 0, "")
     EndIf
 
-    _WriteLog("Ответ сервера: " & StringLeft($sResponse, 200))
+    _WriteLog("Ответ сервера: " & StringLeft($sResponse, 300))
 
     ; Парсим JSON-ответ вручную
-    ; Ожидаемый формат: [{"id":"1","url":"https://youtube.com/shorts/xxx"}, ...]
+    ; Ожидаемый формат: [{"id":1,"url":"https://youtube.com/shorts/xxx","target_watch_time":30}, ...]
     Local $aResult = _ParseURLsFromJSON($sResponse)
 
     Return $aResult
@@ -157,10 +186,19 @@ EndFunc
 ; ============================================================================
 ; === ФУНКЦИЯ ПРОСМОТРА ОДНОГО URL ===========================================
 ; ============================================================================
-Func _ViewURL($sURL, $sURLId)
-    ; Определяем случайное время просмотра
-    Local $iTargetWatchTime = Random($MIN_WATCH_TIME, $MAX_WATCH_TIME, 1)
-    _WriteLog("Целевое время просмотра: " & $iTargetWatchTime & " сек.")
+Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
+    ; Определяем время просмотра: берём от сервера или случайное
+    Local $iTargetWatchTime
+    If $iServerWatchTime > 0 Then
+        ; Добавляем ±20% случайности к серверному времени
+        Local $iJitter = Int($iServerWatchTime * 0.2)
+        $iTargetWatchTime = $iServerWatchTime + Random(-$iJitter, $iJitter, 1)
+        If $iTargetWatchTime < 10 Then $iTargetWatchTime = 10
+        _WriteLog("Целевое время (от сервера ±20%): " & $iTargetWatchTime & " сек. (базовое: " & $iServerWatchTime & ")")
+    Else
+        $iTargetWatchTime = Random($MIN_WATCH_TIME, $MAX_WATCH_TIME, 1)
+        _WriteLog("Целевое время (случайное): " & $iTargetWatchTime & " сек.")
+    EndIf
 
     ; Выбираем профиль Chrome (чередуем для разного отпечатка)
     Local $sProfilePath = $CHROME_PROFILE_DIR & "\profile" & $g_iProfileCounter
@@ -249,7 +287,6 @@ Func _ViewURL($sURL, $sURLId)
                 Local $iTargetX = $iWinX + Random(100, $iWinW - 100, 1)
                 Local $iTargetY = $iWinY + Random(150, $iWinH - 100, 1)
                 _HumanMouseMove($iTargetX, $iTargetY, Random(6, 12, 1))
-                _WriteLog("Действие: Движение мыши -> " & $iTargetX & "," & $iTargetY)
 
             ElseIf $iAction <= 55 Then
                 ; 20% — Скроллинг
@@ -258,10 +295,8 @@ Func _ViewURL($sURL, $sURLId)
 
                 If $iScrollDir = 0 Then
                     _HumanScroll("down", $iScrollAmount)
-                    _WriteLog("Действие: Скролл вниз x" & $iScrollAmount)
                 Else
                     _HumanScroll("up", $iScrollAmount)
-                    _WriteLog("Действие: Скролл вверх x" & $iScrollAmount)
                 EndIf
 
             ElseIf $iAction <= 70 Then
@@ -271,16 +306,14 @@ Func _ViewURL($sURL, $sURLId)
                 _HumanMouseMove($iClickX, $iClickY, Random(5, 10, 1))
                 Sleep(Random(200, 600, 1))
                 MouseClick("left", $iClickX, $iClickY, 1, Random(5, 15, 1))
-                _WriteLog("Действие: Клик -> " & $iClickX & "," & $iClickY)
 
             ElseIf $iAction <= 85 Then
                 ; 15% — Просто пауза (человек смотрит видео)
-                _WriteLog("Действие: Пауза (просмотр)")
+                ; ничего не делаем
 
             Else
                 ; 15% — Движение мыши + лёгкое дрожание
                 _HumanMouseJitter(3, 8)
-                _WriteLog("Действие: Дрожание мыши")
             EndIf
 
             $iActionCount += 1
@@ -310,10 +343,13 @@ EndFunc
 ; ============================================================================
 ; === ФУНКЦИЯ ОТПРАВКИ СТАТУСА НА СЕРВЕР =====================================
 ; ============================================================================
-Func _SendStatus($sURLId, $iWatchSeconds)
-    _WriteLog("Отправка статуса для URL #" & $sURLId & " (время: " & $iWatchSeconds & " сек.)")
+Func _SendStatus($sURLId, $sStatus = "done", $iWatchSeconds = 0, $sError = "")
+    _WriteLog("Отправка статуса '" & $sStatus & "' для URL #" & $sURLId & " (время: " & $iWatchSeconds & " сек.)")
 
-    Local $sPostData = "url_id=" & $sURLId & "&status=done&watch_time=" & $iWatchSeconds
+    Local $sPostData = "url_id=" & $sURLId & "&status=" & $sStatus & "&watch_time=" & $iWatchSeconds & "&worker_id=" & $g_sWorkerId
+    If $sError <> "" Then
+        $sPostData &= "&error=" & $sError
+    EndIf
 
     Local $sResponse = _HttpPost($API_SEND_STATUS, $sPostData)
 
@@ -322,7 +358,7 @@ Func _SendStatus($sURLId, $iWatchSeconds)
         Return SetError(1, 0, False)
     EndIf
 
-    _WriteLog("Ответ сервера на статус: " & StringLeft($sResponse, 100))
+    _WriteLog("Ответ сервера на статус: " & StringLeft($sResponse, 200))
     Return True
 EndFunc
 
@@ -421,7 +457,7 @@ Func _HumanScroll($sDirection = "down", $iAmount = 3)
 EndFunc
 
 ; ============================================================================
-; === HTTP GET ЗАПРОС ЧЕРЕЗ WinHTTP ==========================================
+; === HTTP GET ЗАПРОС ЧЕРЕЗ WinHTTP (с Bearer-токеном) =======================
 ; ============================================================================
 Func _HttpGet($sURL)
     Local $oHTTP = ObjCreate("WinHttp.WinHttpRequest.5.1")
@@ -437,10 +473,15 @@ Func _HttpGet($sURL)
     ; Открываем GET запрос
     $oHTTP.Open("GET", $sURL, False)
 
-    ; Устанавливаем заголовки для имитации обычного браузера
-    $oHTTP.SetRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    $oHTTP.SetRequestHeader("Accept", "application/json, text/plain, */*")
+    ; Устанавливаем заголовки
+    $oHTTP.SetRequestHeader("User-Agent", "YouPub-AutoView/2.0 (" & $g_sWorkerId & ")")
+    $oHTTP.SetRequestHeader("Accept", "application/json")
     $oHTTP.SetRequestHeader("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+
+    ; Авторизация по Bearer-токену
+    If $g_sApiToken <> "" Then
+        $oHTTP.SetRequestHeader("Authorization", "Bearer " & $g_sApiToken)
+    EndIf
 
     ; Отправляем запрос
     Local $bSuccess = Execute('$oHTTP.Send()')
@@ -453,6 +494,11 @@ Func _HttpGet($sURL)
     ; Проверяем статус ответа
     Local $iStatus = $oHTTP.Status
 
+    If $iStatus = 401 Then
+        _WriteLog("ОШИБКА: Неверный или просроченный API-токен (401 Unauthorized)")
+        Return SetError(3, $iStatus, "")
+    EndIf
+
     If $iStatus <> 200 Then
         _WriteLog("ОШИБКА HTTP GET: Статус " & $iStatus & " от " & $sURL)
         Return SetError(3, $iStatus, "")
@@ -463,7 +509,7 @@ Func _HttpGet($sURL)
 EndFunc
 
 ; ============================================================================
-; === HTTP POST ЗАПРОС ЧЕРЕЗ WinHTTP =========================================
+; === HTTP POST ЗАПРОС ЧЕРЕЗ WinHTTP (с Bearer-токеном) ======================
 ; ============================================================================
 Func _HttpPost($sURL, $sPostData)
     Local $oHTTP = ObjCreate("WinHttp.WinHttpRequest.5.1")
@@ -480,9 +526,14 @@ Func _HttpPost($sURL, $sPostData)
     $oHTTP.Open("POST", $sURL, False)
 
     ; Устанавливаем заголовки
-    $oHTTP.SetRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    $oHTTP.SetRequestHeader("User-Agent", "YouPub-AutoView/2.0 (" & $g_sWorkerId & ")")
     $oHTTP.SetRequestHeader("Content-Type", "application/x-www-form-urlencoded")
-    $oHTTP.SetRequestHeader("Accept", "application/json, text/plain, */*")
+    $oHTTP.SetRequestHeader("Accept", "application/json")
+
+    ; Авторизация по Bearer-токену
+    If $g_sApiToken <> "" Then
+        $oHTTP.SetRequestHeader("Authorization", "Bearer " & $g_sApiToken)
+    EndIf
 
     ; Отправляем запрос с данными
     Local $bSuccess = Execute('$oHTTP.Send("' & $sPostData & '")')
@@ -495,6 +546,11 @@ Func _HttpPost($sURL, $sPostData)
     ; Проверяем статус ответа
     Local $iStatus = $oHTTP.Status
 
+    If $iStatus = 401 Then
+        _WriteLog("ОШИБКА: Неверный или просроченный API-токен (401 Unauthorized)")
+        Return SetError(3, $iStatus, "")
+    EndIf
+
     If $iStatus <> 200 Then
         _WriteLog("ОШИБКА HTTP POST: Статус " & $iStatus & " от " & $sURL)
         Return SetError(3, $iStatus, "")
@@ -506,7 +562,7 @@ EndFunc
 
 ; ============================================================================
 ; === ПАРСИНГ JSON ОТВЕТА С URL'ами ==========================================
-; Ожидаемый формат: [{"id":"1","url":"https://..."},{"id":"2","url":"https://..."}]
+; Формат: [{"id":1,"url":"https://...","target_watch_time":30}, ...]
 ; ============================================================================
 Func _ParseURLsFromJSON($sJSON)
     ; Убираем внешние скобки массива
@@ -520,8 +576,14 @@ Func _ParseURLsFromJSON($sJSON)
     ; Убираем [ и ]
     $sJSON = StringMid($sJSON, 2, StringLen($sJSON) - 2)
 
+    ; Пустой массив
+    If StringStripWS($sJSON, 3) = "" Then
+        _WriteLog("Сервер вернул пустой массив — нет URL'ов")
+        Local $aEmpty[0]
+        Return $aEmpty
+    EndIf
+
     ; Разбиваем на объекты по },{ (упрощённый парсинг)
-    ; Заменяем },{ на разделитель
     Local $sDelimiter = "|||SPLIT|||"
     Local $sClean = StringReplace($sJSON, "},{", "}" & $sDelimiter & "{")
     Local $aObjects = StringSplit($sClean, $sDelimiter, 1)
@@ -537,18 +599,18 @@ Func _ParseURLsFromJSON($sJSON)
     For $i = 1 To $aObjects[0]
         Local $sObj = $aObjects[$i]
 
-        ; Извлекаем id
+        ; Извлекаем поля
         Local $sId = _ExtractJSONValue($sObj, "id")
-        ; Извлекаем url
         Local $sUrl = _ExtractJSONValue($sObj, "url")
+        Local $sWatchTime = _ExtractJSONValue($sObj, "target_watch_time")
 
         If $sId <> "" And $sUrl <> "" Then
-            Local $aItem[2] = [$sId, $sUrl]
+            Local $aItem[3] = [$sId, $sUrl, $sWatchTime]
             $aResult[$i - 1] = $aItem
         Else
-            _WriteLog("ПРЕДУПРЕЖДЕНИЕ: Не удалось распарсить объект: " & $sObj)
+            _WriteLog("ПРЕДУПРЕЖДЕНИЕ: Не удалось распарсить объект: " & StringLeft($sObj, 100))
             ; Создаём пустой элемент
-            Local $aEmpty[2] = ["", ""]
+            Local $aEmpty[3] = ["", "", "0"]
             $aResult[$i - 1] = $aEmpty
         EndIf
     Next

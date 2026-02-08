@@ -5,6 +5,9 @@ ChromeProfiles/
 log.txt
 *.log
 
+# Токен авторизации (секрет!)
+token.txt
+
 # AutoIt compiled
 *.exe
 *.a3x
