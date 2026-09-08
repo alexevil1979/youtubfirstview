@@ -30,3 +30,7 @@ worker/data/
 worker/logs/
 worker/.env
 worker/*.db
+
+# Web admin secrets
+web/config.php
+

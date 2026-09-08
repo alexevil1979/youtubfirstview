@@ -1,0 +1,13 @@
+RewriteEngine On
+
+# Pass Authorization header to PHP (Apache often strips it)
+RewriteCond %{HTTP:Authorization} ^(.*)
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+# Pretty API paths
+RewriteRule ^api/autoview/urls/?$ api/autoview/urls.php [L,QSA]
+RewriteRule ^api/autoview/status/?$ api/autoview/status.php [L,QSA]
+
+DirectoryIndex index.php
+Options -Indexes

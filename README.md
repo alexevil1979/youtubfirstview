@@ -7,9 +7,13 @@
 
 Система состоит из частей:
 
-1. **AutoIt скрипт** (`YouTube_Shorts_AutoView.au3`) — Windows-клиент (legacy)
-2. **Ubuntu QA Worker** (`worker/`) — headless smoke-тесты опубликованных видео (Node.js + Playwright), см. [worker/README.md](worker/README.md)
-3. **PHP сервер** (`server/`) — YouPub API, управляет очередью URL'ов
+1. **Веб-админка + API** (`web/`) — публикация URL, токены, логи, настройки на `youtubview.1tlt.ru`
+2. **Ubuntu QA Worker** (`worker/`) — headless smoke-тесты (Node.js + Playwright), см. [worker/README.md](worker/README.md)
+3. **AutoIt скрипт** (`YouTube_Shorts_AutoView.au3`) — Windows-клиент (legacy)
+4. **Legacy PHP** (`server/`) — старые эндпоинты; актуальные — в `web/public/api/`
+
+Деплой на VPS: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**
+
 
 ### Как работает
 
@@ -104,19 +108,18 @@ Global Const $CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.e
 
 ```
 autoityoutube/
-├── YouTube_Shorts_AutoView.au3   # Windows AutoIt (legacy)
-├── token.txt                      # API-токен (НЕ коммитится в git!)
+├── web/                           # Админка + API (DocumentRoot → public/)
+├── deploy/                        # Apache vhost + DEPLOY.md
+├── worker/                        # Ubuntu headless QA worker
+├── YouTube_Shorts_AutoView.au3    # Windows AutoIt (legacy)
+├── server/                        # Legacy PHP API samples
 ├── README.md
-├── worker/                        # Ubuntu headless QA worker (рекомендуется)
-│   ├── README.md
-│   ├── install.sh
-│   └── src/
-├── server/
-│   ├── get_urls.php               # API: GET /api/autoview/urls
-│   ├── status.php                 # API: POST /api/autoview/status
-│   └── setup_database.sql
-└── ChromeProfiles/
+└── token.txt                      # НЕ коммитить
 ```
+
+Админка: дашборд, очередь URL, API-токены, логи workers, настройки.  
+Гайд: [deploy/DEPLOY.md](deploy/DEPLOY.md) · домен `https://youtubview.1tlt.ru` · путь `/ssd/www/youpubview`
+
 
 ## API v2.0
 
