@@ -5,10 +5,11 @@
 
 ## Описание
 
-Система состоит из двух частей:
+Система состоит из частей:
 
-1. **AutoIt скрипт** (`YouTube_Shorts_AutoView.au3`) — клиентская часть (бот), запускается на Windows
-2. **PHP сервер** (`server/`) — серверная часть YouPub, управляет очередью URL'ов
+1. **AutoIt скрипт** (`YouTube_Shorts_AutoView.au3`) — Windows-клиент (legacy)
+2. **Ubuntu QA Worker** (`worker/`) — headless smoke-тесты опубликованных видео (Node.js + Playwright), см. [worker/README.md](worker/README.md)
+3. **PHP сервер** (`server/`) — YouPub API, управляет очередью URL'ов
 
 ### Как работает
 
@@ -103,15 +104,18 @@ Global Const $CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.e
 
 ```
 autoityoutube/
-├── YouTube_Shorts_AutoView.au3   # Основной скрипт AutoIt (v2.0)
+├── YouTube_Shorts_AutoView.au3   # Windows AutoIt (legacy)
 ├── token.txt                      # API-токен (НЕ коммитится в git!)
-├── README.md                      # Документация
-├── .gitignore                     # Исключения Git
+├── README.md
+├── worker/                        # Ubuntu headless QA worker (рекомендуется)
+│   ├── README.md
+│   ├── install.sh
+│   └── src/
 ├── server/
 │   ├── get_urls.php               # API: GET /api/autoview/urls
 │   ├── status.php                 # API: POST /api/autoview/status
-│   └── setup_database.sql         # SQL-схема БД (v2.0)
-└── ChromeProfiles/                # Профили Chrome (создаются автоматически)
+│   └── setup_database.sql
+└── ChromeProfiles/
 ```
 
 ## API v2.0

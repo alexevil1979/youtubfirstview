@@ -1,0 +1,8 @@
+# Пропускаем заголовок Authorization в PHP
+# (Apache по умолчанию его удаляет!)
+RewriteEngine On
+RewriteCond %{HTTP:Authorization} ^(.*)
+RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+
+# Альтернативный способ (если RewriteEngine недоступен)
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1

@@ -18,18 +18,63 @@
 
 header('Content-Type: application/json; charset=utf-8');
 
-// === Авторизация по Bearer-токену ===
-$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-$token = '';
-
-if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
-    $token = $matches[1];
-}
+// === Извлечение токена (несколько способов — fallback-цепочка) ===
+$token = _extractBearerToken();
 
 if (empty($token)) {
     http_response_code(401);
-    echo json_encode(['error' => 'Authorization token required']);
+    echo json_encode(['error' => 'Authorization token required. Send via: Authorization header, ?token= param, or X-Api-Token header']);
     exit;
+}
+
+/**
+ * Извлекает Bearer-токен из нескольких источников (Apache часто удаляет Authorization)
+ */
+function _extractBearerToken() {
+    // Способ 1: Стандартный заголовок Authorization (если Apache пропустил)
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION']
+        ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']  // после RewriteRule
+        ?? '';
+
+    if (!empty($authHeader) && preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
+        return trim($m[1]);
+    }
+
+    // Способ 2: getallheaders() — работает на Apache с mod_php
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        foreach ($headers as $name => $value) {
+            if (strtolower($name) === 'authorization') {
+                if (preg_match('/^Bearer\s+(.+)$/i', $value, $m)) {
+                    return trim($m[1]);
+                }
+            }
+        }
+    }
+
+    // Способ 3: apache_request_headers()
+    if (function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        foreach ($headers as $name => $value) {
+            if (strtolower($name) === 'authorization') {
+                if (preg_match('/^Bearer\s+(.+)$/i', $value, $m)) {
+                    return trim($m[1]);
+                }
+            }
+        }
+    }
+
+    // Способ 4: Кастомный заголовок X-Api-Token (не блокируется Apache)
+    if (!empty($_SERVER['HTTP_X_API_TOKEN'])) {
+        return trim($_SERVER['HTTP_X_API_TOKEN']);
+    }
+
+    // Способ 5: GET-параметр ?token= (запасной вариант)
+    if (!empty($_GET['token'])) {
+        return trim($_GET['token']);
+    }
+
+    return '';
 }
 
 // Подключение к БД (настройте под себя)

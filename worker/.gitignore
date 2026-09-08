@@ -1,0 +1,10 @@
+node_modules/
+dist/
+data/
+logs/
+*.db
+*.db-journal
+.env
+*.log
+playwright-report/
+test-results/

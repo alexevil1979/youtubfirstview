@@ -1,0 +1,23 @@
+services:
+  worker:
+    build: .
+    container_name: youtube-qa-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - worker-data:/app/data
+      - worker-logs:/app/logs
+    # Optional Redis reserved for future multi-process lock — not required now.
+    # depends_on:
+    #   - redis
+
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+
+volumes:
+  worker-data:
+  worker-logs:

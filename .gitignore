@@ -22,3 +22,11 @@ Desktop.ini
 .cursor/
 *.swp
 *.swo
+
+# Ubuntu QA worker
+worker/node_modules/
+worker/dist/
+worker/data/
+worker/logs/
+worker/.env
+worker/*.db

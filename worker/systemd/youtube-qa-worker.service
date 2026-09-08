@@ -1,0 +1,27 @@
+[Unit]
+Description=YouTube QA Worker (headless smoke tests)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=youtube-worker
+Group=youtube-worker
+WorkingDirectory=/opt/youtube-qa-worker
+EnvironmentFile=-/opt/youtube-qa-worker/.env
+ExecStart=/usr/bin/node /opt/youtube-qa-worker/dist/index.js
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=120
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=youtube-qa-worker
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/youtube-qa-worker/data /opt/youtube-qa-worker/logs
+
+[Install]
+WantedBy=multi-user.target

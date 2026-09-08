@@ -1,0 +1,33 @@
+{
+  "name": "youtube-qa-worker",
+  "version": "1.0.0",
+  "description": "Headless Ubuntu worker for YouTube publish smoke tests (Playwright + TypeScript)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "worker:status": "tsx src/cli.ts status",
+    "worker:jobs": "tsx src/cli.ts jobs",
+    "worker:health": "tsx src/cli.ts health",
+    "worker:test": "tsx src/cli.ts test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "playwright": "^1.50.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
