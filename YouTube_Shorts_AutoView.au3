@@ -685,9 +685,6 @@ EndFunc
 ; === СТАРТ PLAY БЕЗ КЛИКОВ (ПРОБЕЛ) ========================================
 ; ============================================================================
 Func _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
-    ; Параметры окна не используются — старт только пробелом, без мыши
-    #forceref $iWinX, $iWinY, $iWinW, $iWinH
-
     _StatusSet("Play", "пробел")
     _WriteLog("Старт Play: один раз Space (без кликов)")
 
@@ -749,61 +746,53 @@ Func _KillChromeByProfile($sProfilePath)
             "Get-CimInstance Win32_Process -Filter ""Name='chrome.exe'"" |" & @CRLF & _
             "  Where-Object { $_.CommandLine -and $_.CommandLine.Contains($ProfilePath) } |" & @CRLF & _
             "  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-    Local $h = FileOpen($sPsFile, 2 + 8)
+    Local $h = FileOpen($sPsFile, 2)
     If $h <> -1 Then
         FileWrite($h, $sPs)
         FileClose($h)
         RunWait('powershell -NoProfile -ExecutionPolicy Bypass -File "' & $sPsFile & '" -ProfilePath "' & $sProfilePath & '"', "", @SW_HIDE)
     EndIf
     Sleep(400)
-    ; Чтобы при следующем запуске не было «Восстановить после аварийного закрытия»
     _ClearChromeCrashRestore($sProfilePath)
 EndFunc
 
-; Сбрасывает флаг аварийного выхода в Preferences профиля Chrome
+; Убирает «Восстановить страницы» после kill — без опасной перезаписи JSON
 Func _ClearChromeCrashRestore($sProfilePath)
     If $sProfilePath = "" Then Return
 
-    Local $aPrefs[2] = [ _
-            $sProfilePath & "\Default\Preferences", _
-            $sProfilePath & "\Preferences" _
-            ]
+    Local $sDefault = $sProfilePath & "\Default"
+    Local $sPref1 = $sDefault & "\Preferences"
+    Local $sPref2 = $sProfilePath & "\Preferences"
 
-    For $p = 0 To UBound($aPrefs)
-        Local $sFile = $aPrefs[$p]
-        If Not FileExists($sFile) Then ContinueLoop
+    If FileExists($sPref1) Then _PatchChromeExitType($sPref1)
+    If FileExists($sPref2) Then _PatchChromeExitType($sPref2)
 
-        Local $sJson = FileRead($sFile)
-        If @error Or $sJson = "" Then ContinueLoop
+    FileDelete($sDefault & "\Current Session")
+    FileDelete($sDefault & "\Current Tabs")
+    FileDelete($sDefault & "\Last Session")
+    FileDelete($sDefault & "\Last Tabs")
+    FileDelete($sProfilePath & "\Current Session")
+    FileDelete($sProfilePath & "\Current Tabs")
+EndFunc
 
-        ; exit_type: Normal + exited_cleanly: true
-        $sJson = StringRegExpReplace($sJson, '"exit_type"\s*:\s*"[^"]*"', '"exit_type":"Normal"')
-        If StringInStr($sJson, '"exit_type"') = 0 Then
-            ; если ключа нет — не ломаем JSON сложной вставкой; флаги Chrome всё равно помогут
-        EndIf
+Func _PatchChromeExitType($sFile)
+    Local $sJson = FileRead($sFile)
+    If $sJson = "" Then Return
 
-        If StringInStr($sJson, '"exited_cleanly"') Then
-            $sJson = StringRegExpReplace($sJson, '"exited_cleanly"\s*:\s*(true|false)', '"exited_cleanly":true')
-        EndIf
+    Local $sNew = $sJson
+    $sNew = StringReplace($sNew, '"exit_type":"Crashed"', '"exit_type":"Normal"')
+    $sNew = StringReplace($sNew, '"exit_type": "Crashed"', '"exit_type": "Normal"')
+    $sNew = StringReplace($sNew, '"exited_cleanly":false', '"exited_cleanly":true')
+    $sNew = StringReplace($sNew, '"exited_cleanly": false', '"exited_cleanly": true')
 
-        ; Убираем session restore hints
-        $sJson = StringRegExpReplace($sJson, '"exit_type"\s*:\s*"Crashed"', '"exit_type":"Normal"')
-
-        Local $hFile = FileOpen($sFile, 2 + 8) ; overwrite
+    If $sNew <> $sJson Then
+        Local $hFile = FileOpen($sFile, 2)
         If $hFile <> -1 Then
-            FileWrite($hFile, $sJson)
+            FileWrite($hFile, $sNew)
             FileClose($hFile)
             _WriteLog("Сброшен crash-restore: " & $sFile)
         EndIf
-    Next
-
-    ; Удаляем файлы сессии — тогда нечего «восстанавливать»
-    FileDelete($sProfilePath & "\Default\Current Session")
-    FileDelete($sProfilePath & "\Default\Current Tabs")
-    FileDelete($sProfilePath & "\Default\Last Session")
-    FileDelete($sProfilePath & "\Default\Last Tabs")
-    FileDelete($sProfilePath & "\Current Session")
-    FileDelete($sProfilePath & "\Current Tabs")
+    EndIf
 EndFunc
 
 Func _CloseChromeWindow($hWnd, $iPID, $sProfilePath = "")
