@@ -338,6 +338,7 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
         Local $iActionCount = 0
         Local $iLastStatusSec = -1
 
+        ; После Play — только ожидание, без кликов/клавиш/скролла (повторный клик = пауза)
         While $iElapsed < ($iTargetWatchTime * 1000) And $g_bRunning
             If Not WinExists($hWnd) Then
                 _WriteLog("ПРЕДУПРЕЖДЕНИЕ: Окно Chrome закрыто раньше времени")
@@ -347,55 +348,27 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
             Local $iLeftSec = Int(($iTargetWatchTime * 1000 - $iElapsed) / 1000)
             If $iLeftSec < 0 Then $iLeftSec = 0
             If $iLeftSec <> $iLastStatusSec Then
-                _StatusSet("Смотрю #" & $sURLId, "~" & $iLeftSec & "с · " & $g_sCurrentAccount)
+                _StatusSet("Смотрю #" & $sURLId, "~" & $iLeftSec & "с · без кликов")
                 $iLastStatusSec = $iLeftSec
             EndIf
 
+            ; Держим окно на переднем плане без кликов по плееру
             If Not WinActive($hWnd) Then
                 WinActivate($hWnd)
-                Sleep(300)
+                Sleep(200)
             EndIf
 
+            ; Только лёгкое движение мыши ВНЕ центра (не кликаем)
             Local $iAction = Random(1, 100, 1)
-
-            If $iAction <= 35 Then
-                Local $iMaxX = $iWinW - 100
-                If $iMaxX < 200 Then $iMaxX = 200
-                Local $iMaxY = $iWinH - 100
-                If $iMaxY < 250 Then $iMaxY = 250
-                Local $iTargetX = $iWinX + Random(100, $iMaxX, 1)
-                Local $iTargetY = $iWinY + Random(150, $iMaxY, 1)
-                _HumanMouseMove($iTargetX, $iTargetY, Random(6, 12, 1))
-
-            ElseIf $iAction <= 55 Then
-                Local $iScrollDir = Random(0, 1, 1)
-                Local $iScrollAmount = Random(1, 5, 1)
-                If $iScrollDir = 0 Then
-                    _HumanScroll("down", $iScrollAmount)
-                Else
-                    _HumanScroll("up", $iScrollAmount)
-                EndIf
-
-            ElseIf $iAction <= 70 Then
-                Local $iMaxCX = $iWinW - 200
-                If $iMaxCX < 300 Then $iMaxCX = 300
-                Local $iMaxCY = $iWinH - 200
-                If $iMaxCY < 350 Then $iMaxCY = 350
-                Local $iClickX = $iWinX + Random(200, $iMaxCX, 1)
-                Local $iClickY = $iWinY + Random(250, $iMaxCY, 1)
-                _HumanMouseMove($iClickX, $iClickY, Random(5, 10, 1))
-                Sleep(Random(200, 600, 1))
-                MouseClick("left", $iClickX, $iClickY, 1, Random(5, 15, 1))
-
-            ElseIf $iAction <= 85 Then
-                ; пауза — смотрит
-            Else
-                _HumanMouseJitter(3, 8)
+            If $iAction <= 25 Then
+                Local $iSafeX = $iWinX + Random(40, 120, 1)
+                Local $iSafeY = $iWinY + Random(40, 90, 1)
+                MouseMove($iSafeX, $iSafeY, Random(8, 14, 1))
             EndIf
+            ; иначе просто ждём — ролик играет
 
             $iActionCount += 1
-            Local $iPause = Random($MIN_PAUSE * 1000, $MAX_PAUSE * 1000, 1)
-            _SmartSleep($iPause)
+            _SmartSleep(Random(2000, 4000, 1))
             $iElapsed = TimerDiff($hTimer)
         WEnd
 
@@ -715,31 +688,20 @@ EndFunc
 ; === КЛИК ПО ЦЕНТРУ (PLAY) =================================================
 ; ============================================================================
 Func _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
-    _StatusSet("Play", "клик по центру")
-    _WriteLog("Клик по центру экрана для запуска воспроизведения")
+    _StatusSet("Play", "один клик по центру")
+    _WriteLog("Один клик Play по центру — дальше без кликов до конца ролика")
 
     WinActivate($hWnd)
     WinWaitActive($hWnd, "", 3)
 
     Local $iCX = $iWinX + Int($iWinW / 2)
-    Local $iCY = $iWinY + Int($iWinH / 2)
-    ; Чуть выше геометрического центра — кнопка Play обычно там
-    $iCY = $iCY - Int($iWinH * 0.02)
+    Local $iCY = $iWinY + Int($iWinH / 2) - Int($iWinH * 0.02)
 
     _HumanMouseMove($iCX, $iCY, Random(5, 9, 1))
-    Sleep(Random(200, 450, 1))
-    MouseClick("left", $iCX, $iCY, 1, Random(4, 10, 1))
-    Sleep(Random(400, 800, 1))
-
-    ; Иногда первый клик только убирает оверлей — второй по центру
-    If Random(0, 1, 1) = 1 Then
-        MouseClick("left", $iCX + Random(-8, 8, 1), $iCY + Random(-8, 8, 1), 1, Random(4, 8, 1))
-        Sleep(Random(300, 600, 1))
-    EndIf
-
-    ; Space как запасной старт playback
-    Send("{SPACE}")
     Sleep(Random(250, 500, 1))
+    ; Ровно один клик — повторный может поставить на паузу
+    MouseClick("left", $iCX, $iCY, 1, Random(4, 10, 1))
+    Sleep(Random(800, 1200, 1))
 EndFunc
 
 ; ============================================================================
