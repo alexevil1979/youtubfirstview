@@ -328,6 +328,11 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
         _StatusSet("Загрузка страницы", $iLoadWait & "с · #" & $sURLId)
         _SmartSleep($iLoadWait * 1000)
 
+        ; Клик по центру — кнопка Play на YouTube (в fullscreen она по центру)
+        If $g_bRunning And WinExists($hWnd) Then
+            _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
+        EndIf
+
         Local $hTimer = TimerInit()
         Local $iElapsed = 0
         Local $iActionCount = 0
@@ -707,6 +712,37 @@ Func _ExtractJSONValue($sJSON, $sKey)
 EndFunc
 
 ; ============================================================================
+; === КЛИК ПО ЦЕНТРУ (PLAY) =================================================
+; ============================================================================
+Func _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
+    _StatusSet("Play", "клик по центру")
+    _WriteLog("Клик по центру экрана для запуска воспроизведения")
+
+    WinActivate($hWnd)
+    WinWaitActive($hWnd, "", 3)
+
+    Local $iCX = $iWinX + Int($iWinW / 2)
+    Local $iCY = $iWinY + Int($iWinH / 2)
+    ; Чуть выше геометрического центра — кнопка Play обычно там
+    $iCY = $iCY - Int($iWinH * 0.02)
+
+    _HumanMouseMove($iCX, $iCY, Random(5, 9, 1))
+    Sleep(Random(200, 450, 1))
+    MouseClick("left", $iCX, $iCY, 1, Random(4, 10, 1))
+    Sleep(Random(400, 800, 1))
+
+    ; Иногда первый клик только убирает оверлей — второй по центру
+    If Random(0, 1, 1) = 1 Then
+        MouseClick("left", $iCX + Random(-8, 8, 1), $iCY + Random(-8, 8, 1), 1, Random(4, 8, 1))
+        Sleep(Random(300, 600, 1))
+    EndIf
+
+    ; Space как запасной старт playback
+    Send("{SPACE}")
+    Sleep(Random(250, 500, 1))
+EndFunc
+
+; ============================================================================
 ; === ОКНА CHROME: СНИМОК / ОЖИДАНИЕ / ЗАКРЫТИЕ ==============================
 ; ============================================================================
 Func _ChromeWindowSnapshot()
@@ -746,13 +782,18 @@ EndFunc
 Func _KillChromeByProfile($sProfilePath)
     If $sProfilePath = "" Then Return
     _WriteLog("Очистка Chrome-процессов профиля: " & $sProfilePath)
-    ; Экранируем путь для PowerShell -like
-    Local $sEsc = StringReplace($sProfilePath, "'", "''")
-    Local $sPs = "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | " & _
-            "Where-Object { $_.CommandLine -and $_.CommandLine -like ('*' + [regex]::Escape('" & $sEsc & "') + '*') } | " & _
-            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-    RunWait(@ComSpec & ' /c powershell -NoProfile -ExecutionPolicy Bypass -Command "' & $sPs & '"', "", @SW_HIDE)
-    Sleep(500)
+    Local $sPsFile = @TempDir & "\autoview_kill_chrome.ps1"
+    Local $sPs = "param([string]$ProfilePath)" & @CRLF & _
+            "Get-CimInstance Win32_Process -Filter ""Name='chrome.exe'"" |" & @CRLF & _
+            "  Where-Object { $_.CommandLine -and $_.CommandLine.Contains($ProfilePath) } |" & @CRLF & _
+            "  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    Local $h = FileOpen($sPsFile, 2 + 8) ; write + create UTF8 without BOM maybe just 2
+    If $h <> -1 Then
+        FileWrite($h, $sPs)
+        FileClose($h)
+        RunWait('powershell -NoProfile -ExecutionPolicy Bypass -File "' & $sPsFile & '" -ProfilePath "' & $sProfilePath & '"', "", @SW_HIDE)
+    EndIf
+    Sleep(400)
 EndFunc
 
 Func _CloseChromeWindow($hWnd, $iPID, $sProfilePath = "")
