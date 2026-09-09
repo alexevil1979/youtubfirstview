@@ -326,7 +326,7 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
 
         _WriteLog("Окно Chrome fullscreen: " & $iWinX & "," & $iWinY & " " & $iWinW & "x" & $iWinH)
 
-        Local $iLoadWait = Random(7, 10, 1)
+        Local $iLoadWait = Random(7, 10, 1) + 20
         _WriteLog("Ожидание загрузки страницы: " & $iLoadWait & " сек.")
         _StatusSet("Загрузка страницы", $iLoadWait & "с · #" & $sURLId)
         _SmartSleep($iLoadWait * 1000)
