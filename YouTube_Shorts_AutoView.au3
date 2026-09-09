@@ -327,10 +327,10 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
         _WriteLog("Ожидание загрузки страницы: " & $iLoadWait & " сек.")
         _StatusSet("Загрузка страницы", $iLoadWait & "с · #" & $sURLId)
         _SmartSleep($iLoadWait * 1000)
-        ; Доп. пауза — плеер/кнопка Play успевают отрисоваться
+        ; Доп. пауза — плеер успевает отрисоваться
         _SmartSleep(1500)
 
-        ; Клик Play по центру (один раз), дальше без нажатий
+        ; Старт Play только пробелом (без кликов мышью)
         If $g_bRunning And WinExists($hWnd) Then
             _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
         EndIf
@@ -354,21 +354,13 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
                 $iLastStatusSec = $iLeftSec
             EndIf
 
-            ; Держим окно на переднем плане без кликов по плееру
+            ; Держим окно на переднем плане без кликов и без клавиш
             If Not WinActive($hWnd) Then
                 WinActivate($hWnd)
                 Sleep(200)
             EndIf
 
-            ; Только лёгкое движение мыши ВНЕ центра (не кликаем)
-            Local $iAction = Random(1, 100, 1)
-            If $iAction <= 25 Then
-                Local $iSafeX = $iWinX + Random(40, 120, 1)
-                Local $iSafeY = $iWinY + Random(40, 90, 1)
-                MouseMove($iSafeX, $iSafeY, Random(8, 14, 1))
-            EndIf
-            ; иначе просто ждём — ролик играет
-
+            ; Только ожидание — никаких кликов/пробела/скролла
             $iActionCount += 1
             _SmartSleep(Random(2000, 4000, 1))
             $iElapsed = TimerDiff($hTimer)
@@ -687,46 +679,26 @@ Func _ExtractJSONValue($sJSON, $sKey)
 EndFunc
 
 ; ============================================================================
-; === КЛИК ПО ЦЕНТРУ (PLAY) =================================================
+; === СТАРТ PLAY БЕЗ КЛИКОВ (ПРОБЕЛ) ========================================
 ; ============================================================================
 Func _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
-    _StatusSet("Play", "запуск воспроизведения")
-    _WriteLog("Старт Play: фокус + клик по центру")
+    ; Параметры окна не используются — старт только пробелом, без мыши
+    #forceref $iWinX, $iWinY, $iWinW, $iWinH
 
-    ; Панель статуса topmost — временно уводим фокус строго на Chrome
+    _StatusSet("Play", "пробел")
+    _WriteLog("Старт Play: один раз Space (без кликов)")
+
     WinActivate($hWnd)
     WinWaitActive($hWnd, "", 5)
-    Sleep(300)
-
-    Local $iCX = $iWinX + Int($iWinW / 2)
-    Local $iCY = $iWinY + Int($iWinH / 2)
-    ; Кнопка Play чуть выше центра кадра
-    $iCY -= Int($iWinH * 0.03)
-
-    ; Подводим и жёстко кликаем (speed=0), иначе клик иногда «теряется»
-    MouseMove($iCX, $iCY, 6)
-    Sleep(400)
-    MouseMove($iCX, $iCY, 0)
-    Sleep(150)
-    MouseDown("left")
-    Sleep(80)
-    MouseUp("left")
-    Sleep(200)
-    ; Дублирующий мгновенный клик в ту же точку (не второй «случайный»)
-    MouseClick("left", $iCX, $iCY, 1, 0)
-    Sleep(900)
-
-    ; Запасной старт горячей клавишей YouTube (один раз)
-    WinActivate($hWnd)
-    Sleep(150)
-    Send("k")
     Sleep(400)
 
-    ; Уводим курсор с кнопки Play, чтобы случайно не нажать паузу
-    MouseMove($iWinX + 60, $iWinY + 60, 8)
-    Sleep(200)
+    ; Один пробел — старт воспроизведения YouTube
+    Send("{SPACE}")
+    Sleep(800)
 
-    _WriteLog("Play: клик+K выполнены, дальше без нажатий")
+    ; Курсор уводим в угол, чтобы случайно ничего не нажать
+    MouseMove($iWinX + 40, $iWinY + 40, 5)
+    Sleep(200)
 EndFunc
 
 ; ============================================================================
