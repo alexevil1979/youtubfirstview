@@ -263,17 +263,22 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
         DirCreate($sProfilePath)
     EndIf
 
-    ; Формируем команду запуска Chrome
-    Local $sChromeArgs = '--new-window --user-data-dir="' & $sProfilePath & '" '
+    ; На всякий случай закрываем старые окна нашего профиля (чтобы не плодились)
+    _KillChromeByProfile($sProfilePath)
+
+    Local $aOldWindows = _ChromeWindowSnapshot()
+
+    ; Полный экран + отдельный профиль
+    Local $sChromeArgs = '--new-window --start-fullscreen '
+    $sChromeArgs &= '--user-data-dir="' & $sProfilePath & '" '
     $sChromeArgs &= '--disable-extensions --no-first-run --disable-default-apps '
     $sChromeArgs &= '--disable-popup-blocking --disable-translate '
-    $sChromeArgs &= '--window-size=1280,900 --window-position=100,50 '
+    $sChromeArgs &= '--disable-session-crashed-bubble --disable-infobars '
     $sChromeArgs &= '"' & $sURL & '"'
 
-    _WriteLog("Запуск Chrome с профилем: profile" & $iProfileNum & " (" & $g_sCurrentAccount & ")")
-    _StatusSet("Chrome #" & $sURLId, $g_sCurrentAccount & " · " & $iTargetWatchTime & "с")
+    _WriteLog("Запуск Chrome fullscreen, профиль: profile" & $iProfileNum & " (" & $g_sCurrentAccount & ")")
+    _StatusSet("Chrome #" & $sURLId, $g_sCurrentAccount & " · fullscreen · " & $iTargetWatchTime & "с")
 
-    ; Запускаем Chrome
     Local $iPID = Run('"' & $CHROME_PATH & '" ' & $sChromeArgs)
 
     If $iPID = 0 Or @error Then
@@ -283,25 +288,32 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
 
     _WriteLog("Chrome запущен, PID: " & $iPID)
 
-    ; Ждём появления окна Chrome (до 15 секунд)
-    Local $hWnd = _WaitForChromeWindow(15)
+    Local $hWnd = _WaitForNewChromeWindow($aOldWindows, 20)
 
     If $hWnd = 0 Then
-        _WriteLog("ПРЕДУПРЕЖДЕНИЕ: Окно Chrome не найдено, но продолжаем...")
-        ; Даём ещё немного времени
-        Sleep(3000)
-        $hWnd = _WaitForChromeWindow(10)
+        _WriteLog("ПРЕДУПРЕЖДЕНИЕ: Новое окно Chrome не найдено, повтор...")
+        _SmartSleep(2000)
+        $hWnd = _WaitForNewChromeWindow($aOldWindows, 10)
     EndIf
 
     If $hWnd <> 0 Then
-        ; Активируем окно Chrome
         WinActivate($hWnd)
         WinWaitActive($hWnd, "", 5)
+        WinSetState($hWnd, "", @SW_MAXIMIZE)
+        _SmartSleep(400)
+        ; Дожимаем fullscreen, если Chrome не ушёл в F11 сам
+        Local $aPosCheck = WinGetPos($hWnd)
+        If IsArray($aPosCheck) And ($aPosCheck[2] < @DesktopWidth - 20 Or $aPosCheck[3] < @DesktopHeight - 40) Then
+            Send("{F11}")
+            _SmartSleep(400)
+        EndIf
 
-        ; Получаем размеры окна для корректной имитации
+        ; Координаты для имитации — весь экран
+        Local $iWinX = 0
+        Local $iWinY = 0
+        Local $iWinW = @DesktopWidth
+        Local $iWinH = @DesktopHeight
         Local $aPos = WinGetPos($hWnd)
-        Local $iWinX = 0, $iWinY = 0, $iWinW = 1280, $iWinH = 900
-
         If IsArray($aPos) Then
             $iWinX = $aPos[0]
             $iWinY = $aPos[1]
@@ -309,22 +321,19 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
             $iWinH = $aPos[3]
         EndIf
 
-        _WriteLog("Окно Chrome: " & $iWinX & "x" & $iWinY & " размер " & $iWinW & "x" & $iWinH)
+        _WriteLog("Окно Chrome fullscreen: " & $iWinX & "," & $iWinY & " " & $iWinW & "x" & $iWinH)
 
-        ; Ждём загрузки страницы (5-8 секунд)
         Local $iLoadWait = Random(5, 8, 1)
         _WriteLog("Ожидание загрузки страницы: " & $iLoadWait & " сек.")
         _StatusSet("Загрузка страницы", $iLoadWait & "с · #" & $sURLId)
         _SmartSleep($iLoadWait * 1000)
 
-        ; === ИМИТАЦИЯ ПОВЕДЕНИЯ ЧЕЛОВЕКА ===
         Local $hTimer = TimerInit()
         Local $iElapsed = 0
         Local $iActionCount = 0
         Local $iLastStatusSec = -1
 
         While $iElapsed < ($iTargetWatchTime * 1000) And $g_bRunning
-            ; Проверяем, что окно ещё существует
             If Not WinExists($hWnd) Then
                 _WriteLog("ПРЕДУПРЕЖДЕНИЕ: Окно Chrome закрыто раньше времени")
                 ExitLoop
@@ -337,26 +346,25 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
                 $iLastStatusSec = $iLeftSec
             EndIf
 
-            ; Активируем окно (на случай если пользователь кликнул куда-то)
             If Not WinActive($hWnd) Then
                 WinActivate($hWnd)
-                Sleep(500)
+                Sleep(300)
             EndIf
 
-            ; Выбираем случайное действие
             Local $iAction = Random(1, 100, 1)
 
             If $iAction <= 35 Then
-                ; 35% — Плавное движение мыши в случайную точку
-                Local $iTargetX = $iWinX + Random(100, $iWinW - 100, 1)
-                Local $iTargetY = $iWinY + Random(150, $iWinH - 100, 1)
+                Local $iMaxX = $iWinW - 100
+                If $iMaxX < 200 Then $iMaxX = 200
+                Local $iMaxY = $iWinH - 100
+                If $iMaxY < 250 Then $iMaxY = 250
+                Local $iTargetX = $iWinX + Random(100, $iMaxX, 1)
+                Local $iTargetY = $iWinY + Random(150, $iMaxY, 1)
                 _HumanMouseMove($iTargetX, $iTargetY, Random(6, 12, 1))
 
             ElseIf $iAction <= 55 Then
-                ; 20% — Скроллинг
-                Local $iScrollDir = Random(0, 1, 1) ; 0 = вниз, 1 = вверх
+                Local $iScrollDir = Random(0, 1, 1)
                 Local $iScrollAmount = Random(1, 5, 1)
-
                 If $iScrollDir = 0 Then
                     _HumanScroll("down", $iScrollAmount)
                 Else
@@ -364,28 +372,25 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
                 EndIf
 
             ElseIf $iAction <= 70 Then
-                ; 15% — Клик в безопасную область (центр страницы, не по рекламе)
-                Local $iClickX = $iWinX + Random(200, $iWinW - 200, 1)
-                Local $iClickY = $iWinY + Random(250, $iWinH - 200, 1)
+                Local $iMaxCX = $iWinW - 200
+                If $iMaxCX < 300 Then $iMaxCX = 300
+                Local $iMaxCY = $iWinH - 200
+                If $iMaxCY < 350 Then $iMaxCY = 350
+                Local $iClickX = $iWinX + Random(200, $iMaxCX, 1)
+                Local $iClickY = $iWinY + Random(250, $iMaxCY, 1)
                 _HumanMouseMove($iClickX, $iClickY, Random(5, 10, 1))
                 Sleep(Random(200, 600, 1))
                 MouseClick("left", $iClickX, $iClickY, 1, Random(5, 15, 1))
 
             ElseIf $iAction <= 85 Then
-                ; 15% — Просто пауза (человек смотрит видео)
-                ; ничего не делаем
-
+                ; пауза — смотрит
             Else
-                ; 15% — Движение мыши + лёгкое дрожание
                 _HumanMouseJitter(3, 8)
             EndIf
 
             $iActionCount += 1
-
-            ; Случайная пауза между действиями
             Local $iPause = Random($MIN_PAUSE * 1000, $MAX_PAUSE * 1000, 1)
             _SmartSleep($iPause)
-
             $iElapsed = TimerDiff($hTimer)
         WEnd
 
@@ -395,12 +400,10 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
         _SmartSleep($iTargetWatchTime * 1000)
     EndIf
 
-    ; Закрываем Chrome
-    _CloseChromeWindow($hWnd, $iPID)
+    ; Закрываем ИМЕННО это окно + процессы профиля
+    _CloseChromeWindow($hWnd, $iPID, $sProfilePath)
 
-    ; Вычисляем фактическое время просмотра
     Local $iActualWatchTime = Int($iTargetWatchTime)
-
     Return $iActualWatchTime
 EndFunc
 
@@ -704,53 +707,86 @@ Func _ExtractJSONValue($sJSON, $sKey)
 EndFunc
 
 ; ============================================================================
-; === ОЖИДАНИЕ ОКНА CHROME ===================================================
+; === ОКНА CHROME: СНИМОК / ОЖИДАНИЕ / ЗАКРЫТИЕ ==============================
 ; ============================================================================
-Func _WaitForChromeWindow($iTimeout = 15)
+Func _ChromeWindowSnapshot()
+    Local $aList = WinList("[CLASS:Chrome_WidgetWin_1]")
+    Local $sOut = "|"
+    If IsArray($aList) Then
+        For $i = 1 To $aList[0][0]
+            If $aList[$i][1] <> 0 Then $sOut &= String($aList[$i][1]) & "|"
+        Next
+    EndIf
+    Return $sOut
+EndFunc
+
+Func _WaitForNewChromeWindow($sOldSnapshot, $iTimeout = 15)
     Local $hTimer = TimerInit()
-
     While TimerDiff($hTimer) < ($iTimeout * 1000)
-        ; Ищем окно Chrome по классу
-        Local $hWnd = WinGetHandle("[CLASS:Chrome_WidgetWin_1]")
-
-        If $hWnd <> 0 And Not @error Then
-            Return $hWnd
+        Local $aList = WinList("[CLASS:Chrome_WidgetWin_1]")
+        If IsArray($aList) Then
+            For $i = 1 To $aList[0][0]
+                Local $hWnd = $aList[$i][1]
+                If $hWnd = 0 Then ContinueLoop
+                If Not WinExists($hWnd) Then ContinueLoop
+                If StringInStr($sOldSnapshot, "|" & String($hWnd) & "|") = 0 Then
+                    ; Берём видимое окно с заголовком
+                    If BitAND(WinGetState($hWnd), 2) Then ; exists+visible roughly
+                        Return $hWnd
+                    EndIf
+                    Return $hWnd
+                EndIf
+            Next
         EndIf
-
-        Sleep(500)
+        Sleep(300)
     WEnd
-
     Return 0
 EndFunc
 
-; ============================================================================
-; === ЗАКРЫТИЕ ОКНА CHROME ===================================================
-; ============================================================================
-Func _CloseChromeWindow($hWnd, $iPID)
-    _WriteLog("Закрытие Chrome...")
+Func _KillChromeByProfile($sProfilePath)
+    If $sProfilePath = "" Then Return
+    _WriteLog("Очистка Chrome-процессов профиля: " & $sProfilePath)
+    ; Экранируем путь для PowerShell -like
+    Local $sEsc = StringReplace($sProfilePath, "'", "''")
+    Local $sPs = "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | " & _
+            "Where-Object { $_.CommandLine -and $_.CommandLine -like ('*' + [regex]::Escape('" & $sEsc & "') + '*') } | " & _
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    RunWait(@ComSpec & ' /c powershell -NoProfile -ExecutionPolicy Bypass -Command "' & $sPs & '"', "", @SW_HIDE)
+    Sleep(500)
+EndFunc
 
-    ; Пытаемся закрыть окно штатно
+Func _CloseChromeWindow($hWnd, $iPID, $sProfilePath = "")
+    _WriteLog("Закрытие Chrome-окна просмотра...")
+    _StatusSet("Закрытие Chrome", "одно окно")
+
     If $hWnd <> 0 And WinExists($hWnd) Then
+        WinActivate($hWnd)
+        Sleep(200)
+        ; Выйти из F11, чтобы корректно закрыть
+        Send("{F11}")
+        Sleep(250)
         WinClose($hWnd)
-        ; Ждём закрытия до 5 секунд
         Local $iWait = 0
-        While WinExists($hWnd) And $iWait < 10
-            Sleep(500)
+        While WinExists($hWnd) And $iWait < 8
+            Sleep(250)
             $iWait += 1
         WEnd
+        If WinExists($hWnd) Then
+            WinKill($hWnd)
+            Sleep(300)
+        EndIf
     EndIf
 
-    ; Если процесс всё ещё работает — завершаем принудительно
-    If ProcessExists($iPID) Then
-        _WriteLog("Принудительное завершение Chrome (PID: " & $iPID & ")")
-        ProcessClose($iPID)
+    ; Гарантированно убиваем процессы именно этого user-data-dir
+    If $sProfilePath <> "" Then
+        _KillChromeByProfile($sProfilePath)
+    ElseIf $iPID > 0 And ProcessExists($iPID) Then
+        RunWait(@ComSpec & " /c taskkill /F /PID " & $iPID & " /T", "", @SW_HIDE)
         ProcessWaitClose($iPID, 5)
     EndIf
 
-    ; Дополнительная пауза после закрытия (2-4 сек)
-    Sleep(Random(2000, 4000, 1))
-
-    _WriteLog("Chrome закрыт")
+    Sleep(800)
+    _WriteLog("Chrome окно закрыто")
 EndFunc
 
 ; ============================================================================
@@ -903,13 +939,13 @@ EndFunc
 ; ============================================================================
 Func _ExitScript()
     $g_bRunning = False
-    _StatusSet("Остановка...", "закрытие")
+    _StatusSet("Остановка...", "закрытие Chrome")
     _WriteLog(">>> Получен сигнал остановки от пользователя <<<")
 
-    Local $hWnd = WinGetHandle("[CLASS:Chrome_WidgetWin_1]")
-    If Not @error And $hWnd <> 0 Then
-        WinClose($hWnd)
-    EndIf
+    ; Закрываем все окна/процессы наших профилей AutoView
+    For $i = 1 To 5
+        _KillChromeByProfile($CHROME_PROFILE_DIR & "\profile" & $i)
+    Next
 
     _WriteLog("=== Скрипт завершён пользователем ===")
     _StatusPanelDestroy()
