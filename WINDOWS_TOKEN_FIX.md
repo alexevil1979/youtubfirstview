@@ -1,57 +1,49 @@
-# Почему 401 и как получить рабочий токен YouPub
+# YouPub: где брать AutoView-токен (из кода проекта)
 
-## Диагноз
+Проверено в `C:\Users\1\Documents\youpub`.
 
-Проверено запросами к `https://you.1tlt.ru/api/autoview/urls`:
+## Правильный URL
 
-- Все 3 значения из `youpub.api_tokens.token` → **401 Invalid or revoked token**
-- Ответ API: `Generate a token at /admin/api-tokens`
+Не `/admin/api-tokens` (его нет).
 
-В таблице хранится **хеш** (и `plain_prefix`), а не тот секрет, который надо класть в `token.txt`.  
-Старый plaintext из БД **не восстановить**. Нужен **новый** токен.
+Нужно:
 
-## Рабочий способ (обязательно)
+**https://you.1tlt.ru/admin/autoview**  
+или зеркало: **https://youpub.site/admin/autoview**
 
-1. Открой: https://you.1tlt.ru/admin/api-tokens  
-2. Войди в аккаунт YouPub  
-3. Создай токен (permission `autoview` / для AutoView)  
-4. Скопируй показанную строку **сразу** (потом не покажут)  
-5. Впиши в `C:\bots\viewer\token.txt` **одной строкой**, без пробелов  
-6. Проверка:
+Сначала логин: `/login` (нужен пользователь с `role = admin`).
+
+На странице AutoView — блок «API-токены для AutoIt» → создать.  
+Plaintext показывают **один раз**.
+
+В коде: `routes/admin.php` → `GET /admin/autoview`, `POST /admin/autoview/tokens/create`.  
+Хранение: `hash('sha256', $plainToken)` в `api_tokens.token` (`AutoViewService::generateToken`).
+
+## Быстрый обход без UI (MySQL на VPS)
+
+```bash
+sudo mysql < /path/to/insert_win_token.sql
+# или вставь SQL вручную из deploy/insert_win_token.sql
+```
+
+В `C:\bots\viewer\token.txt`:
+
+```
+a7c3e91f2b4d6800c1e5f9a2d3b4768e0f1a2b3c4d5e6f708192a3b4c5d6e7f8
+```
+
+Проверка:
 
 ```powershell
 $token = (Get-Content C:\bots\viewer\token.txt -Raw).Trim()
 Invoke-RestMethod -Uri "https://you.1tlt.ru/api/autoview/urls?limit=1&worker_id=test" -Headers @{ Authorization = "Bearer $token" }
 ```
 
-Ожидание: JSON (массив URL или `[]`), не 401.
+## Админ-логин
 
-7. Запусти `YouTube_Shorts_AutoView.au3`
+Дефолтный email в скрипте сброса: `admin@youpub.site`  
+(`youpub/scripts/reset_admin_password.php`). Пароль в репо не хранится — сброс на VPS:
 
-## Опционально: вставить свой секрет через MySQL
-
-Только если бэкенд YouPub сверяет `hash('sha256', plaintext)`.  
-На VPS:
-
-```sql
-INSERT INTO youpub.api_tokens
-  (name, token, plain_prefix, permissions, user_id, is_active, created_at)
-VALUES
-  (
-    'Win10 Bot',
-    '42378d6bf04d05ccffa21ed7c247980700f35cdd600e6c40ca29458f9b57b90a',
-    'ypub_win',
-    'autoview',
-    1,
-    1,
-    NOW()
-  );
+```bash
+cd /path/to/youpub && php scripts/reset_admin_password.php 'НовыйПароль'
 ```
-
-Тогда в `token.txt`:
-
-```
-ypub_win_a7c3e91f2b4d6800c1e5f9a2d3b4768e0f1a2b3c
-```
-
-Если после INSERT всё равно 401 — хеш у YouPub другой (HMAC/app key). Тогда **только** UI `/admin/api-tokens`.
