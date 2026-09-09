@@ -64,8 +64,21 @@ Global $g_bRunning = True              ; Флаг работы скрипта
 Global $g_hStatusGui = 0
 Global $g_idStatusPhase = 0
 Global $g_idStatusDetail = 0
+Global $g_idStatusAccount = 0
+Global $g_idStatusMeta = 0
+Global $g_idStatusStats = 0
 Global $g_idBtnStop = 0
 Global $g_sStatusPhase = "Старт"
+Global $g_hSessionStart = TimerInit()
+Global $g_iSessionDone = 0
+Global $g_iSessionError = 0
+Global $g_iBatchIndex = 0
+Global $g_iBatchTotal = 0
+Global $g_iCurrentProfile = 0
+Global $g_sCurrentAccount = "—"
+Global $g_sTokenPrefix = ""
+Global $g_sApiHost = ""
+
 
 ; ============================================================================
 ; === РЕГИСТРАЦИЯ ГОРЯЧИХ КЛАВИШ =============================================
@@ -88,7 +101,8 @@ If $g_sApiToken = "" Then
     Local $sTokenFile = @ScriptDir & "\token.txt"
     If FileExists($sTokenFile) Then
         $g_sApiToken = StringStripWS(FileRead($sTokenFile), 3)
-        _WriteLog("Токен загружен из token.txt (" & StringLeft($g_sApiToken, 8) & "...)")
+        $g_sTokenPrefix = StringLeft($g_sApiToken, 8)
+        _WriteLog("Токен загружен из token.txt (" & $g_sTokenPrefix & "...)")
     Else
         _WriteLog("ОШИБКА: Токен не задан! Создайте token.txt с API-токеном или укажите в настройках.")
         MsgBox(16, "Ошибка", "API-токен не найден!" & @CRLF & @CRLF & _
@@ -100,6 +114,10 @@ If $g_sApiToken = "" Then
         Exit
     EndIf
 EndIf
+
+If $g_sTokenPrefix = "" And $g_sApiToken <> "" Then $g_sTokenPrefix = StringLeft($g_sApiToken, 8)
+$g_sApiHost = StringReplace(StringReplace($API_BASE_URL, "https://", ""), "http://", "")
+$g_hSessionStart = TimerInit()
 
 _WriteLog("=== Скрипт запущен (v2.0 YouPub) ===")
 _WriteLog("API сервер: " & $API_BASE_URL)
@@ -115,7 +133,7 @@ If Not FileExists($CHROME_PATH) Then
 EndIf
 
 _StatusPanelCreate()
-_StatusSet("Запуск", $g_sWorkerId)
+_StatusSet("Запуск", $g_sApiHost)
 
 ; ============================================================================
 ; === ГЛАВНЫЙ ЦИКЛ ==========================================================
@@ -137,7 +155,9 @@ Func _MainLoop()
 
         If IsArray($aURLs) And UBound($aURLs) > 0 Then
             _WriteLog("Получено URL'ов: " & UBound($aURLs))
-            _StatusSet("Получено URL: " & UBound($aURLs), "старт обработки")
+            $g_iBatchTotal = UBound($aURLs)
+            $g_iBatchIndex = 0
+            _StatusSet("Получено URL: " & $g_iBatchTotal, "старт обработки")
 
             For $i = 0 To UBound($aURLs) - 1
                 If Not $g_bRunning Then ExitLoop
@@ -147,16 +167,19 @@ Func _MainLoop()
                     Local $sURLId = $aItem[0]
                     Local $sURL = $aItem[1]
                     Local $iServerWatchTime = Number($aItem[2])
+                    $g_iBatchIndex = $i + 1
 
                     _WriteLog("Начинаю просмотр URL #" & $sURLId & ": " & $sURL)
                     _StatusSet("Просмотр #" & $sURLId, _ShortUrl($sURL))
                     Local $iWatchTime = _ViewURL($sURL, $sURLId, $iServerWatchTime)
 
                     If $iWatchTime > 0 Then
+                        $g_iSessionDone += 1
                         _StatusSet("Отчёт done", "#" & $sURLId & " · " & $iWatchTime & "с")
                         _SendStatus($sURLId, "done", $iWatchTime)
                         _WriteLog("URL #" & $sURLId & " отработан. Время просмотра: " & $iWatchTime & " сек.")
                     Else
+                        $g_iSessionError += 1
                         _StatusSet("Отчёт error", "#" & $sURLId)
                         _SendStatus($sURLId, "error", 0, "Chrome window not found or closed early")
                         _WriteLog("ОШИБКА: Не удалось просмотреть URL #" & $sURLId)
@@ -229,7 +252,10 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
     EndIf
 
     ; Выбираем профиль Chrome (чередуем для разного отпечатка)
-    Local $sProfilePath = $CHROME_PROFILE_DIR & "\profile" & $g_iProfileCounter
+    Local $iProfileNum = $g_iProfileCounter
+    Local $sProfilePath = $CHROME_PROFILE_DIR & "\profile" & $iProfileNum
+    $g_iCurrentProfile = $iProfileNum
+    $g_sCurrentAccount = _AccountLabel($iProfileNum)
     $g_iProfileCounter += 1
     If $g_iProfileCounter > 5 Then $g_iProfileCounter = 1
 
@@ -244,8 +270,8 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
     $sChromeArgs &= '--window-size=1280,900 --window-position=100,50 '
     $sChromeArgs &= '"' & $sURL & '"'
 
-    _WriteLog("Запуск Chrome с профилем: profile" & ($g_iProfileCounter - 1))
-    _StatusSet("Chrome #" & $sURLId, "профиль · " & $iTargetWatchTime & "с")
+    _WriteLog("Запуск Chrome с профилем: profile" & $iProfileNum & " (" & $g_sCurrentAccount & ")")
+    _StatusSet("Chrome #" & $sURLId, $g_sCurrentAccount & " · " & $iTargetWatchTime & "с")
 
     ; Запускаем Chrome
     Local $iPID = Run('"' & $CHROME_PATH & '" ' & $sChromeArgs)
@@ -307,7 +333,7 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
             Local $iLeftSec = Int(($iTargetWatchTime * 1000 - $iElapsed) / 1000)
             If $iLeftSec < 0 Then $iLeftSec = 0
             If $iLeftSec <> $iLastStatusSec Then
-                _StatusSet("Смотрю #" & $sURLId, "осталось ~" & $iLeftSec & "с")
+                _StatusSet("Смотрю #" & $sURLId, "~" & $iLeftSec & "с · " & $g_sCurrentAccount)
                 $iLastStatusSec = $iLeftSec
             EndIf
 
@@ -762,8 +788,8 @@ EndFunc
 Func _StatusPanelCreate()
     If $g_hStatusGui <> 0 Then Return
 
-    Local $iW = 280
-    Local $iH = 118
+    Local $iW = 310
+    Local $iH = 188
     Local $iX = @DesktopWidth - $iW - 14
     Local $iY = 14
 
@@ -772,31 +798,45 @@ Func _StatusPanelCreate()
             BitOR($WS_EX_TOPMOST, $WS_EX_TOOLWINDOW))
 
     GUISetBkColor(0x1B222C)
-    GUICtrlCreateLabel("AutoView", 10, 8, 180, 18)
+    GUICtrlCreateLabel("AutoView", 10, 8, 160, 18)
     GUICtrlSetFont(-1, 9, 700)
     GUICtrlSetColor(-1, 0x8EC5FF)
 
-    $g_idStatusPhase = GUICtrlCreateLabel("Старт...", 10, 30, 260, 20, $SS_LEFTNOWORDWRAP)
+    $g_idStatusPhase = GUICtrlCreateLabel("Старт...", 10, 28, 290, 18, $SS_LEFTNOWORDWRAP)
     GUICtrlSetFont(-1, 10, 600)
     GUICtrlSetColor(-1, 0xF0F4F8)
     GUICtrlSetBkColor(-1, 0x1B222C)
 
-    $g_idStatusDetail = GUICtrlCreateLabel($g_sWorkerId, 10, 52, 260, 18, $SS_LEFTNOWORDWRAP)
+    $g_idStatusDetail = GUICtrlCreateLabel("—", 10, 48, 290, 16, $SS_LEFTNOWORDWRAP)
     GUICtrlSetFont(-1, 8, 400)
+    GUICtrlSetColor(-1, 0xC5D0DE)
+    GUICtrlSetBkColor(-1, 0x1B222C)
+
+    $g_idStatusAccount = GUICtrlCreateLabel("Акк: —", 10, 68, 290, 16, $SS_LEFTNOWORDWRAP)
+    GUICtrlSetFont(-1, 8, 600)
+    GUICtrlSetColor(-1, 0x7DDEB5)
+    GUICtrlSetBkColor(-1, 0x1B222C)
+
+    $g_idStatusMeta = GUICtrlCreateLabel("Worker / token / API", 10, 86, 290, 16, $SS_LEFTNOWORDWRAP)
+    GUICtrlSetFont(-1, 7, 400)
     GUICtrlSetColor(-1, 0x9AA8B8)
     GUICtrlSetBkColor(-1, 0x1B222C)
 
-    $g_idBtnStop = GUICtrlCreateButton("Стоп", 10, 78, 260, 28)
+    $g_idStatusStats = GUICtrlCreateLabel("Сессия: —", 10, 104, 290, 16, $SS_LEFTNOWORDWRAP)
+    GUICtrlSetFont(-1, 8, 400)
+    GUICtrlSetColor(-1, 0xB8C4D4)
+    GUICtrlSetBkColor(-1, 0x1B222C)
+
+    $g_idBtnStop = GUICtrlCreateButton("Стоп", 10, 130, 290, 42)
     GUICtrlSetBkColor(-1, 0xB33A3A)
     GUICtrlSetColor(-1, 0xFFFFFF)
-    GUICtrlSetFont(-1, 9, 700)
+    GUICtrlSetFont(-1, 10, 700)
     GUICtrlSetOnEvent($g_idBtnStop, "_ExitScript")
 
     GUISetOnEvent($GUI_EVENT_CLOSE, "_ExitScript")
     GUISetState(@SW_SHOW, $g_hStatusGui)
-
-    ; Полупрозрачность ~220/255
-    WinSetTrans($g_hStatusGui, "", 230)
+    WinSetTrans($g_hStatusGui, "", 235)
+    _StatusRefreshMeta()
 EndFunc
 
 Func _StatusSet($sPhase, $sDetail = "")
@@ -804,12 +844,45 @@ Func _StatusSet($sPhase, $sDetail = "")
     $g_sStatusPhase = $sPhase
     If $g_idStatusPhase <> 0 Then GUICtrlSetData($g_idStatusPhase, $sPhase)
     If $g_idStatusDetail <> 0 Then GUICtrlSetData($g_idStatusDetail, $sDetail)
+    _StatusRefreshMeta()
+EndFunc
+
+Func _StatusRefreshMeta()
+    If $g_hStatusGui = 0 Then Return
+
+    Local $sAcc = "Акк: " & $g_sCurrentAccount
+    If $g_iCurrentProfile > 0 Then $sAcc &= "  ·  profile" & $g_iCurrentProfile
+    If $g_idStatusAccount <> 0 Then GUICtrlSetData($g_idStatusAccount, $sAcc)
+
+    Local $sMeta = $g_sWorkerId & "  ·  tok " & $g_sTokenPrefix & "…  ·  " & $g_sApiHost
+    If $g_idStatusMeta <> 0 Then GUICtrlSetData($g_idStatusMeta, $sMeta)
+
+    Local $iUptimeMin = Int(TimerDiff($g_hSessionStart) / 60000)
+    Local $sBatch = ""
+    If $g_iBatchTotal > 0 Then
+        $sBatch = "  ·  пачка " & $g_iBatchIndex & "/" & $g_iBatchTotal
+    EndIf
+    Local $sStats = "Сессия: OK " & $g_iSessionDone & " / ERR " & $g_iSessionError & $sBatch & "  ·  " & $iUptimeMin & " мин"
+    If $g_idStatusStats <> 0 Then GUICtrlSetData($g_idStatusStats, $sStats)
+EndFunc
+
+Func _AccountLabel($iProfileNum)
+    ; Опционально: accounts.ini рядом со скриптом
+    ; [labels]
+    ; 1=Основной
+    ; 2=Резерв
+    Local $sIni = @ScriptDir & "\accounts.ini"
+    If FileExists($sIni) Then
+        Local $sName = IniRead($sIni, "labels", String($iProfileNum), "")
+        If $sName <> "" Then Return $sName
+    EndIf
+    Return "Chrome profile" & $iProfileNum
 EndFunc
 
 Func _ShortUrl($sURL)
     Local $s = StringStripWS($sURL, 3)
-    If StringLen($s) <= 42 Then Return $s
-    Return StringLeft($s, 39) & "..."
+    If StringLen($s) <= 46 Then Return $s
+    Return StringLeft($s, 43) & "..."
 EndFunc
 
 Func _StatusPanelDestroy()
@@ -818,6 +891,9 @@ Func _StatusPanelDestroy()
         $g_hStatusGui = 0
         $g_idStatusPhase = 0
         $g_idStatusDetail = 0
+        $g_idStatusAccount = 0
+        $g_idStatusMeta = 0
+        $g_idStatusStats = 0
         $g_idBtnStop = 0
     EndIf
 EndFunc
