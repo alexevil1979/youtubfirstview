@@ -12,7 +12,8 @@
 3. **AutoIt скрипт** (`YouTube_Shorts_AutoView.au3`) — Windows-клиент (legacy)
 4. **Legacy PHP** (`server/`) — старые эндпоинты; актуальные — в `web/public/api/`
 
-Деплой на VPS: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**
+Деплой на VPS: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**  
+Быстрый запуск старой версии на Win 10: **[WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md)**
 
 
 ### Как работает
