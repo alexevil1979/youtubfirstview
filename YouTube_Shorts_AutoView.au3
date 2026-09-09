@@ -14,6 +14,12 @@
 #include <String.au3>
 #include <WinAPIFiles.au3>
 #include <Misc.au3>
+#include <GUIConstantsEx.au3>
+#include <WindowsConstants.au3>
+#include <StaticConstants.au3>
+#include <ButtonConstants.au3>
+
+Opt("GUIOnEventMode", 1)
 
 ; ============================================================================
 ; === НАСТРОЙКИ (ИЗМЕНЯЙТЕ ПОД СЕБЯ) ========================================
@@ -54,11 +60,19 @@ Global Const $LOG_FILE = @ScriptDir & "\log.txt"
 ; --- Состояние скрипта ---
 Global $g_bRunning = True              ; Флаг работы скрипта
 
+; --- Мини-панель статуса (правый верхний угол) ---
+Global $g_hStatusGui = 0
+Global $g_idStatusPhase = 0
+Global $g_idStatusDetail = 0
+Global $g_idBtnStop = 0
+Global $g_sStatusPhase = "Старт"
+
 ; ============================================================================
 ; === РЕГИСТРАЦИЯ ГОРЯЧИХ КЛАВИШ =============================================
 ; ============================================================================
 HotKeySet("{F10}", "_ExitScript")
 HotKeySet("^!q", "_ExitScript")       ; Ctrl+Alt+Q
+OnAutoItExitRegister("_StatusPanelDestroy")
 
 ; ============================================================================
 ; === ИНИЦИАЛИЗАЦИЯ ==========================================================
@@ -100,30 +114,34 @@ If Not FileExists($CHROME_PATH) Then
     Exit
 EndIf
 
+_StatusPanelCreate()
+_StatusSet("Запуск", $g_sWorkerId)
+
 ; ============================================================================
 ; === ГЛАВНЫЙ ЦИКЛ ==========================================================
 ; ============================================================================
 
 _MainLoop()
+_StatusPanelDestroy()
 
 ; ============================================================================
 ; === ФУНКЦИЯ ГЛАВНОГО ЦИКЛА =================================================
 ; ============================================================================
 Func _MainLoop()
     _WriteLog("Запуск главного цикла...")
+    _StatusSet("Главный цикл", "ожидание задач")
 
     While $g_bRunning
-        ; Получаем новые URL с сервера
+        _StatusSet("Запрос URL", "сервер YouPub...")
         Local $aURLs = _GetNewURLs()
 
         If IsArray($aURLs) And UBound($aURLs) > 0 Then
             _WriteLog("Получено URL'ов: " & UBound($aURLs))
+            _StatusSet("Получено URL: " & UBound($aURLs), "старт обработки")
 
-            ; Обрабатываем каждый URL
             For $i = 0 To UBound($aURLs) - 1
                 If Not $g_bRunning Then ExitLoop
 
-                ; Каждый элемент — массив [url_id, url, target_watch_time]
                 If IsArray($aURLs[$i]) Then
                     Local $aItem = $aURLs[$i]
                     Local $sURLId = $aItem[0]
@@ -131,36 +149,41 @@ Func _MainLoop()
                     Local $iServerWatchTime = Number($aItem[2])
 
                     _WriteLog("Начинаю просмотр URL #" & $sURLId & ": " & $sURL)
+                    _StatusSet("Просмотр #" & $sURLId, _ShortUrl($sURL))
                     Local $iWatchTime = _ViewURL($sURL, $sURLId, $iServerWatchTime)
 
                     If $iWatchTime > 0 Then
+                        _StatusSet("Отчёт done", "#" & $sURLId & " · " & $iWatchTime & "с")
                         _SendStatus($sURLId, "done", $iWatchTime)
                         _WriteLog("URL #" & $sURLId & " отработан. Время просмотра: " & $iWatchTime & " сек.")
                     Else
+                        _StatusSet("Отчёт error", "#" & $sURLId)
                         _SendStatus($sURLId, "error", 0, "Chrome window not found or closed early")
                         _WriteLog("ОШИБКА: Не удалось просмотреть URL #" & $sURLId)
                     EndIf
 
-                    ; Пауза между URL'ами (5-15 секунд)
                     If $g_bRunning And $i < UBound($aURLs) - 1 Then
                         Local $iPauseBetween = Random(5, 15, 1)
                         _WriteLog("Пауза между URL'ами: " & $iPauseBetween & " сек.")
+                        _StatusSet("Пауза " & $iPauseBetween & "с", "между URL")
                         _SmartSleep($iPauseBetween * 1000)
                     EndIf
                 EndIf
             Next
         Else
             _WriteLog("Нет новых URL'ов или ошибка получения. Ожидаю...")
+            _StatusSet("Нет URL", "ожидание очереди")
         EndIf
 
-        ; Ожидание перед следующей проверкой
         If $g_bRunning Then
             Local $iWaitInterval = Random($MIN_CHECK_INTERVAL, $MAX_CHECK_INTERVAL, 1)
             _WriteLog("Следующая проверка URL'ов через " & $iWaitInterval & " сек.")
+            _StatusSet("Ожидание " & $iWaitInterval & "с", "следующий опрос API")
             _SmartSleep($iWaitInterval * 1000)
         EndIf
     WEnd
 
+    _StatusSet("Остановлено", "")
     _WriteLog("=== Скрипт остановлен ===")
 EndFunc
 
@@ -169,6 +192,7 @@ EndFunc
 ; ============================================================================
 Func _GetNewURLs()
     _WriteLog("Запрашиваю URL'ы с сервера...")
+    _StatusSet("API GET urls", "limit=" & $API_LIMIT)
 
     Local $sRequestURL = $API_GET_URLS & "?limit=" & $API_LIMIT & "&worker_id=" & $g_sWorkerId
     Local $sResponse = _HttpGet($sRequestURL)
@@ -221,6 +245,7 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
     $sChromeArgs &= '"' & $sURL & '"'
 
     _WriteLog("Запуск Chrome с профилем: profile" & ($g_iProfileCounter - 1))
+    _StatusSet("Chrome #" & $sURLId, "профиль · " & $iTargetWatchTime & "с")
 
     ; Запускаем Chrome
     Local $iPID = Run('"' & $CHROME_PATH & '" ' & $sChromeArgs)
@@ -263,18 +288,27 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
         ; Ждём загрузки страницы (5-8 секунд)
         Local $iLoadWait = Random(5, 8, 1)
         _WriteLog("Ожидание загрузки страницы: " & $iLoadWait & " сек.")
+        _StatusSet("Загрузка страницы", $iLoadWait & "с · #" & $sURLId)
         _SmartSleep($iLoadWait * 1000)
 
         ; === ИМИТАЦИЯ ПОВЕДЕНИЯ ЧЕЛОВЕКА ===
         Local $hTimer = TimerInit()
         Local $iElapsed = 0
         Local $iActionCount = 0
+        Local $iLastStatusSec = -1
 
         While $iElapsed < ($iTargetWatchTime * 1000) And $g_bRunning
             ; Проверяем, что окно ещё существует
             If Not WinExists($hWnd) Then
                 _WriteLog("ПРЕДУПРЕЖДЕНИЕ: Окно Chrome закрыто раньше времени")
                 ExitLoop
+            EndIf
+
+            Local $iLeftSec = Int(($iTargetWatchTime * 1000 - $iElapsed) / 1000)
+            If $iLeftSec < 0 Then $iLeftSec = 0
+            If $iLeftSec <> $iLastStatusSec Then
+                _StatusSet("Смотрю #" & $sURLId, "осталось ~" & $iLeftSec & "с")
+                $iLastStatusSec = $iLeftSec
             EndIf
 
             ; Активируем окно (на случай если пользователь кликнул куда-то)
@@ -700,7 +734,7 @@ Func _SmartSleep($iMilliseconds)
     Local $hTimer = TimerInit()
 
     While TimerDiff($hTimer) < $iMilliseconds And $g_bRunning
-        Sleep(250) ; Проверяем каждые 250 мс
+        Sleep(100)
     WEnd
 EndFunc
 
@@ -723,18 +757,85 @@ Func _WriteLog($sMessage)
 EndFunc
 
 ; ============================================================================
-; === ОБРАБОТЧИК ГОРЯЧЕЙ КЛАВИШИ ВЫХОДА ======================================
+; === МИНИ-ПАНЕЛЬ СТАТУСА (ПРАВЫЙ ВЕРХНИЙ УГОЛ) ==============================
+; ============================================================================
+Func _StatusPanelCreate()
+    If $g_hStatusGui <> 0 Then Return
+
+    Local $iW = 280
+    Local $iH = 118
+    Local $iX = @DesktopWidth - $iW - 14
+    Local $iY = 14
+
+    $g_hStatusGui = GUICreate("AutoView", $iW, $iH, $iX, $iY, _
+            BitOR($WS_POPUP, $WS_BORDER), _
+            BitOR($WS_EX_TOPMOST, $WS_EX_TOOLWINDOW))
+
+    GUISetBkColor(0x1B222C)
+    GUICtrlCreateLabel("AutoView", 10, 8, 180, 18)
+    GUICtrlSetFont(-1, 9, 700)
+    GUICtrlSetColor(-1, 0x8EC5FF)
+
+    $g_idStatusPhase = GUICtrlCreateLabel("Старт...", 10, 30, 260, 20, $SS_LEFTNOWORDWRAP)
+    GUICtrlSetFont(-1, 10, 600)
+    GUICtrlSetColor(-1, 0xF0F4F8)
+    GUICtrlSetBkColor(-1, 0x1B222C)
+
+    $g_idStatusDetail = GUICtrlCreateLabel($g_sWorkerId, 10, 52, 260, 18, $SS_LEFTNOWORDWRAP)
+    GUICtrlSetFont(-1, 8, 400)
+    GUICtrlSetColor(-1, 0x9AA8B8)
+    GUICtrlSetBkColor(-1, 0x1B222C)
+
+    $g_idBtnStop = GUICtrlCreateButton("Стоп", 10, 78, 260, 28)
+    GUICtrlSetBkColor(-1, 0xB33A3A)
+    GUICtrlSetColor(-1, 0xFFFFFF)
+    GUICtrlSetFont(-1, 9, 700)
+    GUICtrlSetOnEvent($g_idBtnStop, "_ExitScript")
+
+    GUISetOnEvent($GUI_EVENT_CLOSE, "_ExitScript")
+    GUISetState(@SW_SHOW, $g_hStatusGui)
+
+    ; Полупрозрачность ~220/255
+    WinSetTrans($g_hStatusGui, "", 230)
+EndFunc
+
+Func _StatusSet($sPhase, $sDetail = "")
+    If $g_hStatusGui = 0 Then Return
+    $g_sStatusPhase = $sPhase
+    If $g_idStatusPhase <> 0 Then GUICtrlSetData($g_idStatusPhase, $sPhase)
+    If $g_idStatusDetail <> 0 Then GUICtrlSetData($g_idStatusDetail, $sDetail)
+EndFunc
+
+Func _ShortUrl($sURL)
+    Local $s = StringStripWS($sURL, 3)
+    If StringLen($s) <= 42 Then Return $s
+    Return StringLeft($s, 39) & "..."
+EndFunc
+
+Func _StatusPanelDestroy()
+    If $g_hStatusGui <> 0 Then
+        GUIDelete($g_hStatusGui)
+        $g_hStatusGui = 0
+        $g_idStatusPhase = 0
+        $g_idStatusDetail = 0
+        $g_idBtnStop = 0
+    EndIf
+EndFunc
+
+; ============================================================================
+; === ОБРАБОТЧИК ГОРЯЧЕЙ КЛАВИШИ / КНОПКИ СТОП ===============================
 ; ============================================================================
 Func _ExitScript()
     $g_bRunning = False
-    _WriteLog(">>> Получен сигнал остановки от пользователя (горячая клавиша) <<<")
+    _StatusSet("Остановка...", "закрытие")
+    _WriteLog(">>> Получен сигнал остановки от пользователя <<<")
 
-    ; Закрываем все окна Chrome, которые мы могли открыть
     Local $hWnd = WinGetHandle("[CLASS:Chrome_WidgetWin_1]")
     If Not @error And $hWnd <> 0 Then
         WinClose($hWnd)
     EndIf
 
     _WriteLog("=== Скрипт завершён пользователем ===")
+    _StatusPanelDestroy()
     Exit
 EndFunc
