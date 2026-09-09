@@ -333,7 +333,7 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
         ; Доп. пауза — плеер успевает отрисоваться
         _SmartSleep(1500)
 
-        ; Старт Play только пробелом (без кликов мышью)
+        ; Один клик по кнопке Play (координаты со скрина Shorts), дальше без нажатий
         If $g_bRunning And WinExists($hWnd) Then
             _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
         EndIf
@@ -682,22 +682,40 @@ Func _ExtractJSONValue($sJSON, $sKey)
 EndFunc
 
 ; ============================================================================
-; === СТАРТ PLAY БЕЗ КЛИКОВ (ПРОБЕЛ) ========================================
+; === ОДИН КЛИК ПО КНОПКЕ PLAY (Shorts) =====================================
+; По скрину 1016x574 кнопка Play ≈ (536, 313) → ~53% ширины, ~55% высоты окна
 ; ============================================================================
 Func _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
-    _StatusSet("Play", "пробел")
-    _WriteLog("Старт Play: один раз Space (без кликов)")
+    _StatusSet("Play", "1 клик по кнопке")
+    _WriteLog("Play: один клик по координатам кнопки Shorts")
 
     WinActivate($hWnd)
     WinWaitActive($hWnd, "", 5)
-    Sleep(400)
+    Sleep(300)
 
-    ; Один пробел — старт воспроизведения YouTube
-    Send("{SPACE}")
-    Sleep(800)
+    ; Актуальные размеры окна (на случай если изменились)
+    Local $aPos = WinGetPos($hWnd)
+    If IsArray($aPos) Then
+        $iWinX = $aPos[0]
+        $iWinY = $aPos[1]
+        $iWinW = $aPos[2]
+        $iWinH = $aPos[3]
+    EndIf
 
-    ; Курсор уводим в угол, чтобы случайно ничего не нажать
-    MouseMove($iWinX + 40, $iWinY + 40, 5)
+    ; Координаты с скрина: 536/1016 ≈ 0.527, 313/574 ≈ 0.545
+    Local $iCX = $iWinX + Int($iWinW * 0.527)
+    Local $iCY = $iWinY + Int($iWinH * 0.545)
+
+    _WriteLog("Play click at " & $iCX & "," & $iCY & " (win " & $iWinW & "x" & $iWinH & ")")
+
+    MouseMove($iCX, $iCY, 5)
+    Sleep(350)
+    ; Ровно один клик, без Space и без повторного MouseDown
+    MouseClick("left", $iCX, $iCY, 1, 0)
+    Sleep(600)
+
+    ; Уводим курсор влево-вверх от плеера (не кликаем)
+    MouseMove($iWinX + 30, $iWinY + 80, 6)
     Sleep(200)
 EndFunc
 
