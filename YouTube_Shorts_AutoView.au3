@@ -26,8 +26,10 @@ Global Const $API_SEND_STATUS = $API_BASE_URL & "/api/autoview/status" ; Энд�
 Global Const $API_LIMIT = 5                                           ; Сколько URL запрашивать за раз
 
 ; --- Авторизация ---
-; Токен создаётся в админке: /admin/autoview → "Создать токен"
-; Можно хранить в файле token.txt рядом со скриптом
+; Токен создаётся в MySQL (таблица api_tokens), как раньше:
+;   INSERT INTO api_tokens (token, description, is_active)
+;   VALUES ('ваш-секрет', 'Бот Win10', 1);
+; Хранить в файле token.txt рядом со скриптом (одна строка = токен)
 Global $g_sApiToken = ""
 
 ; --- Chrome ---
@@ -76,9 +78,11 @@ If $g_sApiToken = "" Then
     Else
         _WriteLog("ОШИБКА: Токен не задан! Создайте token.txt с API-токеном или укажите в настройках.")
         MsgBox(16, "Ошибка", "API-токен не найден!" & @CRLF & @CRLF & _
-            "1. Откройте " & $API_BASE_URL & "/admin/autoview" & @CRLF & _
-            "2. Создайте токен" & @CRLF & _
-            "3. Сохраните его в файл token.txt рядом со скриптом")
+            "1. На сервере MySQL:" & @CRLF & _
+            "   INSERT INTO api_tokens (token, description, is_active)" & @CRLF & _
+            "   VALUES ('ваш-секрет', 'Бот Win10', 1);" & @CRLF & _
+            "2. Создайте token.txt рядом со скриптом" & @CRLF & _
+            "3. Впишите туда тот же токен одной строкой")
         Exit
     EndIf
 EndIf

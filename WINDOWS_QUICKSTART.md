@@ -1,19 +1,53 @@
 # Быстрый запуск старой версии (Windows 10)
 
 Гайд для **AutoIt-клиента** `YouTube_Shorts_AutoView.au3` на новой машине с Windows 10.  
-Сервер (админка/API) уже должен быть доступен; на ПК ставятся только клиент и Chrome.
+На ПК ставятся только клиент и Chrome. Сервер API уже должен работать.
 
 > Это legacy Windows-бот. Для Ubuntu headless см. `worker/` и `deploy/DEPLOY.md`.
 
 ---
 
+## Про токен (как было раньше)
+
+Токен — это просто строка в таблице `api_tokens` на сервере.  
+Админка для этого **не нужна**: как в старой версии — создали в MySQL → положили в `token.txt`.
+
+### 1) Создать токен на сервере (MySQL)
+
+```sql
+INSERT INTO api_tokens (token, description, is_active)
+VALUES ('my-win10-secret-token', 'Бот на компьютере Win10 №1', 1);
+```
+
+Подставьте свою длинную строку вместо `my-win10-secret-token`.
+
+Проверка:
+
+```sql
+SELECT id, token, description, is_active FROM api_tokens;
+```
+
+### 2) Файл на Windows-ПК
+
+Рядом со скриптом создайте `token.txt` — **одна строка**, тот же текст:
+
+```
+my-win10-secret-token
+```
+
+Без кавычек, без пробелов в начале/конце.
+
+Готово. Скрипт читает только `token.txt` (или значение `$g_sApiToken` в коде). Веб-морда тут ни при чём.
+
+---
+
 ## Что нужно заранее
 
-1. Доступ к серверу API (один из вариантов):
-   - новый: `https://youtubview.1tlt.ru`
-   - старый: `https://you.1tlt.ru`
-2. API-токен из админки (**API-токены** / Create token) или из БД `api_tokens`
-3. В очереди на сервере есть URL со статусом `pending`
+1. Доступ к серверу API, например:
+   - `https://you.1tlt.ru` (как в скрипте по умолчанию)
+   - или `https://youtubview.1tlt.ru` (если переключили URL)
+2. Токен в БД + `token.txt` (см. выше)
+3. В очереди есть URL со статусом `pending`
 
 ---
 
@@ -24,27 +58,17 @@
 | **Google Chrome** | [https://www.google.com/chrome/](https://www.google.com/chrome/) |
 | **AutoIt v3** | [https://www.autoitscript.com/site/autoit/downloads/](https://www.autoitscript.com/site/autoit/downloads/) → *AutoIt Full Installation* |
 
-Рекомендуется также поставить **SciTE4AutoIt3** (редактор) с той же страницы — удобно править `$API_BASE_URL`.
+Рекомендуется **SciTE4AutoIt3** — удобно править `$API_BASE_URL`.
 
-Проверьте путь Chrome (обычно так):
+Путь Chrome обычно:
 
 ```
 C:\Program Files\Google\Chrome\Application\chrome.exe
 ```
 
-Если Chrome в другом месте (x86) — поправите путь в скрипте (шаг 3).
-
 ---
 
 ## 2. Скопировать файлы на ПК
-
-Создайте папку, например:
-
-```
-C:\bots\youtubview\
-```
-
-Положите туда минимум:
 
 ```
 C:\bots\youtubview\
@@ -52,88 +76,61 @@ C:\bots\youtubview\
 └── token.txt
 ```
 
-`token.txt` — одна строка, только токен, без кавычек и пробелов:
-
-```
-ваш-секретный-токен
-```
-
-Файлы `ChromeProfiles\` и `log.txt` появятся сами после первого запуска.
+`ChromeProfiles\` и `log.txt` появятся сами после запуска.
 
 ---
 
-## 3. Указать сервер API (обязательно проверить)
+## 3. Указать сервер API
 
-Откройте `YouTube_Shorts_AutoView.au3` в SciTE и найдите строки:
+В начале `YouTube_Shorts_AutoView.au3`:
 
 ```autoit
 Global Const $API_BASE_URL = "https://you.1tlt.ru"
 Global Const $CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 ```
 
-Если работаете с новой админкой — поставьте:
-
-```autoit
-Global Const $API_BASE_URL = "https://youtubview.1tlt.ru"
-```
-
-Сохраните файл (`Ctrl+S`).
-
-Опционально можно менять:
-
-- `$API_LIMIT` — сколько URL брать за раз (по умолчанию 5)
-- `$MIN_WATCH_TIME` / `$MAX_WATCH_TIME` — если сервер не задал `target_watch_time`
+Меняйте `$API_BASE_URL` только если API на другом домене. Сохраните файл.
 
 ---
 
 ## 4. Запуск
 
-1. ПК разблокирован, есть монитор/RDP (скрипт кликает мышью — **нужен интерактивный рабочий стол**).
-2. Закройте лишние окна Chrome или оставьте один профиль — скрипт сам откроет окна с отдельными профилями.
-3. Двойной клик по `YouTube_Shorts_AutoView.au3`  
-   (или ПКМ → *Run Script* / в SciTE клавиша `F5`).
-4. При запросе UAC — разрешите (скрипт с `#RequireAdmin`).
+1. Нужен обычный рабочий стол (мышь/клавиатура) — не headless-сервер.
+2. Двойной клик по `YouTube_Shorts_AutoView.au3` (или SciTE → `F5`).
+3. При UAC — разрешить (`#RequireAdmin`).
 
-В логе `log.txt` должно появиться примерно:
+В `log.txt`:
 
 ```
 === Скрипт запущен (v2.0 YouPub) ===
-API сервер: https://youtubview.1tlt.ru
-Worker ID: bot_PCNAME_1234
 Токен загружен из token.txt (...)
 Получено URL'ов: N
 ```
 
-Остановка: **F10** или **Ctrl+Alt+Q**.
+Стоп: **F10** или **Ctrl+Alt+Q**.
 
 ---
 
-## 5. Быстрая проверка «всё живо»
-
-В PowerShell (подставьте свой токен и URL сервера):
+## 5. Быстрая проверка API
 
 ```powershell
-$token = Get-Content C:\bots\youtubview\token.txt -Raw
-$token = $token.Trim()
-$uri = "https://youtubview.1tlt.ru/api/autoview/urls?limit=1&worker_id=win10-test"
+$token = (Get-Content C:\bots\youtubview\token.txt -Raw).Trim()
+$base = "https://you.1tlt.ru"   # тот же, что $API_BASE_URL
+$uri = "$base/api/autoview/urls?limit=1&worker_id=win10-test"
 Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $token" }
 ```
 
-- JSON с URL → токен и сервер OK, можно запускать `.au3`
-- `401` → неверный/неактивный токен
-- таймаут/DNS → проверьте интернет и домен
-
-В админке: **Логи** / статусы URL должны меняться на `processing` → `done`/`error`.
+| Ответ | Значение |
+|-------|----------|
+| JSON с URL | токен и сервер OK |
+| `401` | токена нет в БД / `is_active=0` / опечатка в `token.txt` |
+| таймаут | сеть / DNS / неверный `$API_BASE_URL` |
 
 ---
 
-## 6. Автозапуск при входе в Windows (опционально)
+## 6. Автозапуск (опционально)
 
-1. `Win+R` → `shell:startup`
-2. Создайте ярлык на `YouTube_Shorts_AutoView.au3`
-3. Либо скомпилируйте в `.exe` (SciTE → Tools → Build) и положите ярлык на `.exe`
-
-Важно: пользователь должен быть залогинен (не только «заблокированный экран» без сессии). Для серверов без GUI лучше Ubuntu worker.
+`Win+R` → `shell:startup` → ярлык на `.au3` (или скомпилированный `.exe`).
 
 ---
 
@@ -142,22 +139,20 @@ Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $token" }
 | Симптом | Что сделать |
 |---------|-------------|
 | «API-токен не найден» | Создайте `token.txt` рядом со скриптом |
-| «Chrome не найден» | Поправьте `$CHROME_PATH` (часто `C:\Program Files (x86)\...`) |
-| Нет URL / пустой ответ | В админке добавьте URL в очередь (`pending`) |
-| 401 в логе | Новый токен, проверьте `is_active` |
-| Окна не кликаются | Не сворачивайте сессию; не запускайте без GUI; не мешайте мышью во время просмотра |
-| Антивирус блокирует AutoIt | Разрешите папку бота / добавьте исключение |
+| `401 Unauthorized` | `INSERT` в `api_tokens`, строка в `token.txt` должна совпадать 1 в 1 |
+| «Chrome не найден» | Поправьте `$CHROME_PATH` |
+| Нет URL | Добавьте записи в таблицу `urls` со статусом `pending` |
+| Не кликает | Нужна активная сессия Windows (не locked без GUI) |
 
 ---
 
-## Чеклист на новой Win 10
+## Чеклист
 
-- [ ] Chrome установлен, путь верный  
-- [ ] AutoIt v3 установлен  
-- [ ] Папка с `.au3` + `token.txt`  
-- [ ] `$API_BASE_URL` указывает на ваш сервер  
-- [ ] PowerShell-тест API возвращает URL  
-- [ ] Скрипт запущен, в `log.txt` есть `Worker ID` и просмотры  
-- [ ] В админке статусы URL обновляются  
+- [ ] Chrome + AutoIt  
+- [ ] `INSERT` в `api_tokens`  
+- [ ] `token.txt` = тот же токен  
+- [ ] `$API_BASE_URL` верный  
+- [ ] PowerShell-тест без 401  
+- [ ] Скрипт пишет в `log.txt`, статусы URL на сервере меняются  
 
-Готово: машина в работе как Windows-worker `bot_<ИМЯ_ПК>_<PID>`.
+Как и раньше: Windows-клиент = `.au3` + `token.txt` + запись в MySQL.

@@ -60,16 +60,16 @@ mysql -u root -p < server/setup_database.sql
 - `GET /api/autoview/urls` → `server/get_urls.php`
 - `POST /api/autoview/status` → `server/status.php`
 
-### 2. Создание API-токена
+### 2. Создание API-токена (как раньше — через MySQL, админка не нужна)
 
 ```sql
-INSERT INTO api_tokens (token, description)
-VALUES ('ваш-секретный-токен', 'Бот на компьютере №1');
+INSERT INTO api_tokens (token, description, is_active)
+VALUES ('ваш-секретный-токен', 'Бот на компьютере №1', 1);
 ```
 
 ### 3. Настройка клиента
 
-1. Создайте файл `token.txt` рядом со скриптом и вставьте в него API-токен
+1. Создайте файл `token.txt` рядом со скриптом и вставьте **тот же** токен одной строкой
 2. При необходимости отредактируйте настройки в начале `YouTube_Shorts_AutoView.au3`:
 
 ```autoit
