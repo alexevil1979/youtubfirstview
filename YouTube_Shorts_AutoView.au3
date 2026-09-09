@@ -323,12 +323,14 @@ Func _ViewURL($sURL, $sURLId, $iServerWatchTime = 0)
 
         _WriteLog("Окно Chrome fullscreen: " & $iWinX & "," & $iWinY & " " & $iWinW & "x" & $iWinH)
 
-        Local $iLoadWait = Random(5, 8, 1)
+        Local $iLoadWait = Random(7, 10, 1)
         _WriteLog("Ожидание загрузки страницы: " & $iLoadWait & " сек.")
         _StatusSet("Загрузка страницы", $iLoadWait & "с · #" & $sURLId)
         _SmartSleep($iLoadWait * 1000)
+        ; Доп. пауза — плеер/кнопка Play успевают отрисоваться
+        _SmartSleep(1500)
 
-        ; Клик по центру — кнопка Play на YouTube (в fullscreen она по центру)
+        ; Клик Play по центру (один раз), дальше без нажатий
         If $g_bRunning And WinExists($hWnd) Then
             _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
         EndIf
@@ -688,20 +690,43 @@ EndFunc
 ; === КЛИК ПО ЦЕНТРУ (PLAY) =================================================
 ; ============================================================================
 Func _ClickCenterPlay($hWnd, $iWinX, $iWinY, $iWinW, $iWinH)
-    _StatusSet("Play", "один клик по центру")
-    _WriteLog("Один клик Play по центру — дальше без кликов до конца ролика")
+    _StatusSet("Play", "запуск воспроизведения")
+    _WriteLog("Старт Play: фокус + клик по центру")
 
+    ; Панель статуса topmost — временно уводим фокус строго на Chrome
     WinActivate($hWnd)
-    WinWaitActive($hWnd, "", 3)
+    WinWaitActive($hWnd, "", 5)
+    Sleep(300)
 
     Local $iCX = $iWinX + Int($iWinW / 2)
-    Local $iCY = $iWinY + Int($iWinH / 2) - Int($iWinH * 0.02)
+    Local $iCY = $iWinY + Int($iWinH / 2)
+    ; Кнопка Play чуть выше центра кадра
+    $iCY -= Int($iWinH * 0.03)
 
-    _HumanMouseMove($iCX, $iCY, Random(5, 9, 1))
-    Sleep(Random(250, 500, 1))
-    ; Ровно один клик — повторный может поставить на паузу
-    MouseClick("left", $iCX, $iCY, 1, Random(4, 10, 1))
-    Sleep(Random(800, 1200, 1))
+    ; Подводим и жёстко кликаем (speed=0), иначе клик иногда «теряется»
+    MouseMove($iCX, $iCY, 6)
+    Sleep(400)
+    MouseMove($iCX, $iCY, 0)
+    Sleep(150)
+    MouseDown("left")
+    Sleep(80)
+    MouseUp("left")
+    Sleep(200)
+    ; Дублирующий мгновенный клик в ту же точку (не второй «случайный»)
+    MouseClick("left", $iCX, $iCY, 1, 0)
+    Sleep(900)
+
+    ; Запасной старт горячей клавишей YouTube (один раз)
+    WinActivate($hWnd)
+    Sleep(150)
+    Send("k")
+    Sleep(400)
+
+    ; Уводим курсор с кнопки Play, чтобы случайно не нажать паузу
+    MouseMove($iWinX + 60, $iWinY + 60, 8)
+    Sleep(200)
+
+    _WriteLog("Play: клик+K выполнены, дальше без нажатий")
 EndFunc
 
 ; ============================================================================
