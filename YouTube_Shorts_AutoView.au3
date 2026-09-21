@@ -53,6 +53,9 @@ Global Const $MIN_PAUSE = 3            ; Минимальная пауза ме�
 Global Const $MAX_PAUSE = 12           ; Максимальная пауза между действиями (секунды)
 Global Const $MIN_CHECK_INTERVAL = 30  ; Минимальный интервал проверки новых URL (секунды)
 Global Const $MAX_CHECK_INTERVAL = 60  ; Максимальный интервал проверки новых URL (секунды)
+Global Const $NET_CHECK_URL = "https://www.youtube.com/generate_204"
+Global Const $NET_CHECK_FALLBACK = "https://www.youtube.com/"
+Global Const $NET_RETRY_INTERVAL = 15  ; Пауза между проверками сети (сек)
 
 ; --- Лог ---
 Global Const $LOG_FILE = @ScriptDir & "\log.txt"
@@ -150,6 +153,9 @@ Func _MainLoop()
     _StatusSet("Главный цикл", "ожидание задач")
 
     While $g_bRunning
+        ; Без YouTube / интернета цикл просмотра не начинаем
+        If Not _WaitUntilYoutubeOnline() Then ExitLoop
+
         _StatusSet("Запрос URL", "сервер YouPub...")
         Local $aURLs = _GetNewURLs()
 
@@ -161,6 +167,9 @@ Func _MainLoop()
 
             For $i = 0 To UBound($aURLs) - 1
                 If Not $g_bRunning Then ExitLoop
+
+                ; Перед каждым роликом ещё раз проверяем доступность
+                If Not _WaitUntilYoutubeOnline() Then ExitLoop
 
                 If IsArray($aURLs[$i]) Then
                     Local $aItem = $aURLs[$i]
@@ -496,6 +505,67 @@ Func _HumanScroll($sDirection = "down", $iAmount = 3)
         ; Случайная пауза между прокрутками
         Sleep(Random(100, 400, 1))
     Next
+EndFunc
+
+; ============================================================================
+; === ПРОВЕРКА ДОСТУПНОСТИ YOUTUBE / ИНТЕРНЕТА ==============================
+; ============================================================================
+
+; True = YouTube доступен
+Func _IsYoutubeReachable()
+    If _HttpProbe($NET_CHECK_URL) Then Return True
+    If _HttpProbe($NET_CHECK_FALLBACK) Then Return True
+    Return False
+EndFunc
+
+; Лёгкий GET без авторизации. True при 200/204/3xx
+Func _HttpProbe($sURL)
+    Local $oHTTP = ObjCreate("WinHttp.WinHttpRequest.5.1")
+    If Not IsObj($oHTTP) Then Return False
+
+    $oHTTP.SetTimeouts(3000, 5000, 5000, 8000)
+
+    Local $bOk = False
+    Local $iStatus = 0
+
+    $oHTTP.Open("GET", $sURL, False)
+    If @error Then Return False
+
+    $oHTTP.SetRequestHeader("User-Agent", "YouPub-AutoView/2.0-netcheck")
+
+    Local $bSent = Execute("$oHTTP.Send()")
+    If @error Then Return False
+
+    $iStatus = Number($oHTTP.Status)
+    If $iStatus = 204 Or $iStatus = 200 Or $iStatus = 301 Or $iStatus = 302 Or $iStatus = 303 Then
+        $bOk = True
+    EndIf
+
+    Return $bOk
+EndFunc
+
+; Ждёт появления YouTube. True = онлайн, False = остановка скрипта
+Func _WaitUntilYoutubeOnline()
+    Local $bLoggedWait = False
+
+    While $g_bRunning
+        If _IsYoutubeReachable() Then
+            If $bLoggedWait Then
+                _WriteLog("YouTube снова доступен — продолжаем")
+                _StatusSet("YouTube OK", "сеть восстановлена")
+            EndIf
+            Return True
+        EndIf
+
+        If Not $bLoggedWait Then
+            _WriteLog("YouTube/интернет недоступны — ждём появления связи...")
+            $bLoggedWait = True
+        EndIf
+        _StatusSet("Нет YouTube / сети", "повтор через " & $NET_RETRY_INTERVAL & "с")
+        _SmartSleep($NET_RETRY_INTERVAL * 1000)
+    WEnd
+
+    Return False
 EndFunc
 
 ; ============================================================================
