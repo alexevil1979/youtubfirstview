@@ -56,6 +56,8 @@ Global Const $MAX_CHECK_INTERVAL = 60  ; Максимальный интерва
 Global Const $NET_CHECK_URL = "https://www.youtube.com/generate_204"
 Global Const $NET_CHECK_FALLBACK = "https://www.youtube.com/"
 Global Const $NET_RETRY_INTERVAL = 15  ; Пауза между проверками сети (сек)
+; Hiddify mixed/HTTP proxy (по умолчанию). Можно переопределить в accounts.ini [proxy] hiddify=host:port
+Global $g_sHiddifyProxy = "127.0.0.1:12334"
 
 ; --- Лог ---
 Global Const $LOG_FILE = @ScriptDir & "\log.txt"
@@ -121,6 +123,8 @@ EndIf
 If $g_sTokenPrefix = "" And $g_sApiToken <> "" Then $g_sTokenPrefix = StringLeft($g_sApiToken, 8)
 $g_sApiHost = StringReplace(StringReplace($API_BASE_URL, "https://", ""), "http://", "")
 $g_hSessionStart = TimerInit()
+_LoadHiddifyProxySettings()
+_WriteLog("Проверка YouTube через Hiddify proxy: " & $g_sHiddifyProxy)
 
 _WriteLog("=== Скрипт запущен (v2.0 YouPub) ===")
 _WriteLog("API сервер: " & $API_BASE_URL)
@@ -508,60 +512,110 @@ Func _HumanScroll($sDirection = "down", $iAmount = 3)
 EndFunc
 
 ; ============================================================================
-; === ПРОВЕРКА ДОСТУПНОСТИ YOUTUBE / ИНТЕРНЕТА ==============================
+; === ПРОВЕРКА YOUTUBE ЧЕРЕЗ ПРОКСИ HIDDIFY =================================
 ; ============================================================================
 
-; True = YouTube доступен
-Func _IsYoutubeReachable()
-    If _HttpProbe($NET_CHECK_URL) Then Return True
-    If _HttpProbe($NET_CHECK_FALLBACK) Then Return True
-    Return False
+Func _LoadHiddifyProxySettings()
+    Local $sIni = @ScriptDir & "\accounts.ini"
+    If Not FileExists($sIni) Then Return
+    Local $sProxy = IniRead($sIni, "proxy", "hiddify", "")
+    If $sProxy <> "" Then $g_sHiddifyProxy = StringStripWS($sProxy, 3)
 EndFunc
 
-; Лёгкий GET без авторизации. True при 200/204/3xx
-Func _HttpProbe($sURL)
-    Local $oHTTP = ObjCreate("WinHttp.WinHttpRequest.5.1")
-    If Not IsObj($oHTTP) Then Return False
-
-    $oHTTP.SetTimeouts(3000, 5000, 5000, 8000)
-
-    Local $bOk = False
-    Local $iStatus = 0
-
-    $oHTTP.Open("GET", $sURL, False)
-    If @error Then Return False
-
-    $oHTTP.SetRequestHeader("User-Agent", "YouPub-AutoView/2.0-netcheck")
-
-    Local $bSent = Execute("$oHTTP.Send()")
-    If @error Then Return False
-
-    $iStatus = Number($oHTTP.Status)
-    If $iStatus = 204 Or $iStatus = 200 Or $iStatus = 301 Or $iStatus = 302 Or $iStatus = 303 Then
-        $bOk = True
+; True если локальный порт Hiddify слушает
+Func _IsHiddifyProxyUp()
+    TCPStartup()
+    Local $a = StringSplit($g_sHiddifyProxy, ":")
+    If $a[0] < 2 Then
+        TCPShutdown()
+        Return False
     EndIf
-
+    Local $sHost = $a[1]
+    Local $iPort = Number($a[2])
+    If $iPort <= 0 Then $iPort = 12334
+    Local $iSock = TCPConnect($sHost, $iPort)
+    Local $bOk = ($iSock <> -1)
+    If $bOk Then TCPCloseSocket($iSock)
+    TCPShutdown()
     Return $bOk
 EndFunc
 
-; Ждёт появления YouTube. True = онлайн, False = остановка скрипта
+; True = YouTube доступен через Hiddify
+Func _IsYoutubeReachable()
+    Local $sDetail = ""
+
+    If Not _IsHiddifyProxyUp() Then
+        _WriteLog("Hiddify proxy недоступен: " & $g_sHiddifyProxy)
+        Return False
+    EndIf
+
+    If _HttpProbeViaHiddify($NET_CHECK_URL, $sDetail) Then
+        _WriteLog("YouTube OK via Hiddify: " & $NET_CHECK_URL & " (" & $sDetail & ")")
+        Return True
+    EndIf
+
+    If _HttpProbeViaHiddify($NET_CHECK_FALLBACK, $sDetail) Then
+        _WriteLog("YouTube OK via Hiddify: " & $NET_CHECK_FALLBACK & " (" & $sDetail & ")")
+        Return True
+    EndIf
+
+    _WriteLog("YouTube FAIL via Hiddify (" & $g_sHiddifyProxy & "): " & $sDetail)
+    Return False
+EndFunc
+
+; GET через HTTP-прокси Hiddify (mixed port, обычно 12334)
+Func _HttpProbeViaHiddify($sURL, ByRef $sDetail)
+    $sDetail = "no-response"
+    Local $oHTTP = ObjCreate("WinHttp.WinHttpRequest.5.1")
+    If Not IsObj($oHTTP) Then
+        $sDetail = "no-winhttp"
+        Return False
+    EndIf
+
+    $oHTTP.SetTimeouts(5000, 10000, 10000, 20000)
+
+    ; 2 = named proxy — принудительно через Hiddify, не напрямую
+    $oHTTP.SetProxy(2, $g_sHiddifyProxy)
+
+    ; TLS 1.0|1.1|1.2
+    $oHTTP.Option(9) = 2688
+
+    $oHTTP.Open("GET", $sURL, False)
+    $oHTTP.SetRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) YouPub-AutoView/2.0-hiddify-check")
+    $oHTTP.SetRequestHeader("Accept", "*/*")
+
+    Execute("$oHTTP.Send()")
+    If @error Then
+        $sDetail = "send-error"
+        Return False
+    EndIf
+
+    Local $iStatus = Number($oHTTP.Status)
+    $sDetail = "HTTP " & $iStatus & " proxy=" & $g_sHiddifyProxy
+
+    ; 204/200/3xx/прочие ответы сервера — канал через Hiddify жив
+    If $iStatus >= 200 And $iStatus < 500 Then Return True
+    Return False
+EndFunc
+
+; Ждёт YouTube через Hiddify. True = онлайн, False = стоп
 Func _WaitUntilYoutubeOnline()
     Local $bLoggedWait = False
 
     While $g_bRunning
         If _IsYoutubeReachable() Then
             If $bLoggedWait Then
-                _WriteLog("YouTube снова доступен — продолжаем")
-                _StatusSet("YouTube OK", "сеть восстановлена")
+                _WriteLog("YouTube снова доступен через Hiddify — продолжаем")
+                _StatusSet("YouTube OK", "через Hiddify")
             EndIf
             Return True
         EndIf
 
         If Not $bLoggedWait Then
-            _WriteLog("YouTube/интернет недоступны — ждём появления связи...")
+            _WriteLog("Ждём YouTube через Hiddify (" & $g_sHiddifyProxy & ")...")
             $bLoggedWait = True
         EndIf
-        _StatusSet("Нет YouTube / сети", "повтор через " & $NET_RETRY_INTERVAL & "с")
+        _StatusSet("Нет YouTube", "Hiddify " & $g_sHiddifyProxy)
         _SmartSleep($NET_RETRY_INTERVAL * 1000)
     WEnd
 
